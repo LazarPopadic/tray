@@ -3,6 +3,7 @@
 import * as S from './lib/store.js';
 import * as Today from './ui/today.js';
 import * as Tray from './ui/tray.js';
+import * as Quick from './ui/quick.js';
 import * as Recipes from './ui/recipes.js';
 import * as Calendar from './ui/calendar.js';
 import * as Streak from './ui/streakview.js';
@@ -24,50 +25,48 @@ const TABS = [
   ['#/settings', 'Settings', 'settings']
 ];
 
+const VIEWS = {
+  tray:      { mod: Tray,     back: true },
+  quick:     { mod: Quick,    back: true },
+  breakfast: { mod: Recipes,  back: true },
+  shake:     { mod: Recipes,  back: true },
+  calendar:  { mod: Calendar },
+  streak:    { mod: Streak },
+  settings:  { mod: Settings },
+  today:     { mod: Today }
+};
+
 let view = null;
-let route = '';
 
 function parse() {
-  const h = (location.hash || '#/today').replace(/^#\/?/, '');
-  return h.split('/').filter(Boolean);
+  return (location.hash || '#/today').replace(/^#\/?/, '').split('/').filter(Boolean);
 }
 
 function pick() {
   const p = parse();
-  switch (p[0]) {
-    case 'tray':
-      return { mod: Tray, kind: 'tray', arg: p[1] || 'lunch' };
-    case 'breakfast': return { mod: Recipes, kind: 'breakfast' };
-    case 'shake':     return { mod: Recipes, kind: 'shake' };
-    case 'calendar':  return { mod: Calendar, kind: 'calendar' };
-    case 'streak':    return { mod: Streak, kind: 'streak' };
-    case 'settings':  return { mod: Settings, kind: 'settings' };
-    default:          return { mod: Today, kind: 'today' };
-  }
+  const kind = VIEWS[p[0]] ? p[0] : 'today';
+  return { ...VIEWS[kind], kind, arg: p[1] || null };
 }
 
 function heading(v) {
-  switch (v.kind) {
-    case 'tray': return { title: Tray.title(), sub: '', back: true };
-    case 'breakfast':
-    case 'shake': return { title: Recipes.title(), sub: '', back: true };
-    case 'calendar': return { title: 'Calendar', sub: '' };
-    case 'streak': return { title: 'Streak', sub: '' };
-    case 'settings': return { title: 'Settings', sub: '' };
-    default: return { title: 'Tray', sub: dayLabel(S.today()) };
-  }
+  const mod = v.mod;
+  if (v.kind === 'today') return { title: 'Tray', sub: dayLabel(S.today()) };
+  if (mod.title) return { title: mod.title(), sub: mod.sub ? mod.sub() : '' };
+  return { title: v.kind.replace(/^./, c => c.toUpperCase()), sub: '' };
 }
 
 function shell(v) {
   const h = heading(v);
   const tab = '#/' + (['today', 'calendar', 'streak', 'settings'].includes(v.kind) ? v.kind : 'today');
+  const dock = v.mod.hasDock && v.mod.dock ? v.mod.dock() : '';
   return `
     <div class="topbar">
-      ${h.back ? '<button class="back" data-act="goback" aria-label="Back">&larr;</button>' : ''}
+      ${v.back ? '<button class="back" data-act="goback" aria-label="Back">&larr;</button>' : ''}
       <h1>${esc(h.title)}</h1>
-      ${h.sub ? `<span class="sub">${esc(h.sub)}</span>` : ''}
+      ${h.sub ? `<span class="sub">${h.sub}</span>` : ''}
     </div>
-    <main id="main">${v.mod.render()}</main>
+    <main id="main" class="${dock ? 'with-dock' : ''}">${v.mod.render()}</main>
+    ${dock ? `<div class="dock">${dock}</div>` : ''}
     <nav class="nav" aria-label="Sections">
       ${TABS.map(([href, label, icon]) => `<a href="${href}"
         ${href === tab ? 'aria-current="page"' : ''}>
@@ -76,13 +75,12 @@ function shell(v) {
 }
 
 function render(opts = {}) {
-  const v = view;
-  if (!v) return;
+  if (!view) return;
   const focus = document.activeElement;
   const keep = opts.keepFocus && focus && focus.dataset && focus.dataset.act === opts.keepFocus;
   const caret = keep ? focus.selectionStart : null;
 
-  document.getElementById('app').innerHTML = shell(v);
+  document.getElementById('app').innerHTML = shell(view);
 
   if (keep) {
     const again = document.querySelector(`[data-act="${opts.keepFocus}"]`);
@@ -97,7 +95,11 @@ function toast(msg) {
   if (!el) {
     el = document.createElement('div');
     el.id = 'toast';
-    el.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);bottom:calc(var(--bar-h) + env(safe-area-inset-bottom) + 16px);z-index:50;background:var(--ink);color:var(--ground);padding:10px 16px;border-radius:999px;font-size:13.5px;box-shadow:var(--shadow)';
+    el.setAttribute('role', 'status');
+    el.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);' +
+      'bottom:calc(var(--bar-h) + env(safe-area-inset-bottom) + 76px);z-index:50;' +
+      'background:var(--ink);color:var(--ground);padding:10px 16px;border-radius:var(--r-full);' +
+      'font-size:13.5px;box-shadow:var(--shadow)';
     document.body.appendChild(el);
   }
   el.textContent = msg;
@@ -112,33 +114,35 @@ function go(hash) {
 
 function navigate() {
   const v = pick();
+
   if (v.kind === 'tray') {
-    if (!Tray.active() || Tray.currentSlot() !== v.arg) Tray.start(v.arg);
-  } else if (Tray.active()) {
-    Tray.stop();
-  }
+    if (!Tray.active() || (v.arg && Tray.currentSlot() !== v.arg)) Tray.start(v.arg);
+  } else if (Tray.active()) Tray.stop();
+
+  if (v.kind === 'quick') { if (!Quick.active()) Quick.start(); }
+  else if (Quick.active()) Quick.stop();
+
   if (v.kind === 'breakfast' || v.kind === 'shake') Recipes.start(v.kind);
+
   closeSheet();
   view = v;
   render();
   window.scrollTo(0, 0);
 }
 
-/* ---------- event delegation ------------------------------------------------- */
+/* ---------- event delegation -------------------------------------------------- */
 
 function dispatch(act, ds, e) {
   const rerender = o => render(o);
-  /* Freeze sheets are opened from two different screens; one owner handles them. */
+  /* Freeze sheets open from two screens; one module owns them. */
   if (act === 'fzsave' || act === 'fzdel' || act === 'addfreeze') {
-    Streak.onAct(act, ds, e, rerender, go);
-    return;
+    return Streak.onAct(act, ds, e, rerender, go);
   }
   if (act === 'goback') {
     if (view.kind === 'tray' && Tray.back()) return render();
     return go('#/today');
   }
-  const mod = view.mod;
-  if (mod && mod.onAct) mod.onAct(act, ds, e, rerender, go);
+  if (view.mod && view.mod.onAct) view.mod.onAct(act, ds, e, rerender, go);
 }
 
 document.addEventListener('click', e => {
@@ -166,18 +170,15 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && sheetOpen()) closeSheet();
 });
 
-/* ---------- boot -------------------------------------------------------------- */
+/* ---------- boot ---------------------------------------------------------------- */
 
 S.load();
-S.subscribe(() => { /* store saves itself; views re-render explicitly */ });
 navigate();
 
-/* sw.js sits next to index.html, two levels up from this file, so its scope is the app root.
-   Registration failing is not fatal — it only means no offline cache this visit. */
+/* sw.js sits next to index.html, two levels up from this file, so its scope is the app
+   root. Registration failing only means no offline cache this visit. */
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   window.addEventListener('load', () => {
-    navigator.serviceWorker
-      .register(new URL('../../sw.js', import.meta.url))
-      .catch(() => {});
+    navigator.serviceWorker.register(new URL('../../sw.js', import.meta.url)).catch(() => {});
   });
 }

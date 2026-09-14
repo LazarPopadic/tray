@@ -24,7 +24,7 @@ export function render() {
   const est = FOODS.filter(f => f.estimated).length;
 
   return `
-    ${unexported >= 30 ? `<div class="warn" style="margin-bottom:12px">
+    ${unexported >= 30 ? `<div class="note warn" style="margin-bottom:var(--s4)">
       <b>${unexported} days since your last backup.</b> iOS can clear this app's storage when the
       phone runs low on space. Export now and mail it to yourself.</div>` : ''}
 

@@ -26,7 +26,10 @@ function defaults() {
       lastExportAt: null
     },
     days: {},
-    recent: { plat: [], garniture: [], periph: [] }
+    recent: { plat: [], garniture: [], periph: [] },
+    /* How often each main has actually been confirmed with each side. This is the
+       layer that makes predictions personal, and it beats the national menu prior. */
+    pairs: {}
   };
 }
 
@@ -56,7 +59,8 @@ function migrate(d) {
                 slotPlan: { ...base.settings.slotPlan, ...((d.settings || {}).slotPlan || {}) },
                 recipes:  { ...base.settings.recipes,  ...((d.settings || {}).recipes  || {}) } },
     days: d.days || {},
-    recent: { ...base.recent, ...(d.recent || {}) }
+    recent: { ...base.recent, ...(d.recent || {}) },
+    pairs: d.pairs || {}
   };
 }
 
@@ -153,6 +157,33 @@ function rememberRecent(entry) {
 }
 
 export function recent(bucket) { return state.recent[bucket] || []; }
+
+/* ---------- what actually goes with what ------------------------------------- */
+
+export function rememberPairing(platId, sideIds) {
+  if (!platId || !sideIds || !sideIds.length) return;
+  const row = state.pairs[platId] || (state.pairs[platId] = {});
+  for (const id of sideIds) row[id] = (row[id] || 0) + 1;
+}
+
+export function pairCount(platId, sideId) {
+  const row = platId && state.pairs[platId];
+  return (row && row[sideId]) || 0;
+}
+
+/* A counter for one main, ready to hand to the predictor. */
+export function pairHistory(platId) {
+  return id => pairCount(platId, id);
+}
+
+/* Across every main, so a périphérique you always take gets credit even with a new main. */
+export function anyPairHistory() {
+  const totals = {};
+  for (const row of Object.values(state.pairs)) {
+    for (const [id, n] of Object.entries(row)) totals[id] = (totals[id] || 0) + n;
+  }
+  return id => totals[id] || 0;
+}
 
 export function uid() {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);

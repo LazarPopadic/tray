@@ -15,7 +15,9 @@ export function start() {
   month = month || monthKey(S.today());
 }
 
-export function title() { return monthLabel(month); }
+/* The month is named by its own control further down the screen, so the bar just
+   names the section. title() is called before render(), so it initialises state. */
+export function title() { start(); return 'Calendar'; }
 
 function cell(key, today, st) {
   if (!key) return '<div class="cell blank"></div>';
@@ -33,7 +35,7 @@ function cell(key, today, st) {
   if (!has && !frozen && key < today) cls.push('empty-past');
   return `<button class="${cls.join(' ')}" data-act="day" data-k="${key}">
     <span class="d">${Number(key.slice(8))}</span>
-    ${has ? `<span class="bar" style="height:${h.toFixed(0)}%"></span>` : ''}
+    ${has ? `<span class="lv" style="height:${h.toFixed(0)}%"></span>` : ''}
     ${pHit ? '<span class="pdot"></span>' : ''}
   </button>`;
 }

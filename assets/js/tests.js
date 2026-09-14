@@ -8,11 +8,13 @@ import * as D from './lib/dates.js';
 import * as R from './lib/recommend.js';
 import * as ST from './lib/streak.js';
 import * as S from './lib/store.js';
-import { FOODS, BY_ID, PLATS, STAPLES, PERIPH, BREAD, food } from './data/foods.js';
+import { FOODS, BY_ID, PLATS, STAPLES, PERIPH, GARNITURES, BREAD, food } from './data/foods.js';
 import { INGREDIENTS, ALL_HOME, homeItem } from './data/home.js';
 import { TARGETS, SLOT_PLAN, SLOT_ORDER, BREAKFAST_DEFAULT, SHAKE_DEFAULT, rankOf } from './config.js';
 import * as Tray from './ui/tray.js';
-import { dishCard } from './ui/common.js';
+import * as P from './lib/predict.js';
+import { tagsFor, affinity, OBSERVED_FREQ } from './data/pairings.js';
+import { tile } from './ui/common.js';
 
 /* Before anything else: the store must not write. The tests build a fixture day and
    reset the state, and a debounced save landing after the run would overwrite real data. */
@@ -91,6 +93,17 @@ t('date keys are local, not UTC', () => {
   /* 23:30 local on the 31st is already the 1st in UTC for a positive offset. */
   const d = new Date(2026, 11, 31, 23, 30);
   assert(D.dayKey(d, 4) === '2026-12-31', D.dayKey(d, 4));
+});
+
+t('the slot guess wraps around midnight', () => {
+  const all = ['breakfast', 'lunch', 'dinner', 'shake'];
+  const at = (h, m) => D.nearestSlot(all, new Date(2026, 8, 15, h, m));
+  assert(at(0, 30) === 'shake', `00:30 should guess the shake, got ${at(0, 30)}`);
+  assert(at(7, 45) === 'breakfast', `07:45 got ${at(7, 45)}`);
+  assert(at(12, 20) === 'lunch', `12:20 got ${at(12, 20)}`);
+  assert(at(19, 10) === 'dinner', `19:10 got ${at(19, 10)}`);
+  assert(at(23, 0) === 'shake', `23:00 got ${at(23, 0)}`);
+  return 'midnight, morning, noon, evening, late';
 });
 
 t('month grid starts on Monday and has the right length', () => {
@@ -281,31 +294,148 @@ t('breakfast + two recommended trays + shake lands within 5% of 3550 and over 17
 
 g('Tray builder (§8.2)');
 
-t('the bread roll is on by default', () => {
+t('picking the main fills in the whole tray', () => {
   Tray.start('lunch');
   Tray.onAct('plat', { id: 'turkey_madras' }, null, () => {}, () => {});
-  Tray.onAct('garn', { id: 'semolina' }, null, () => {}, () => {});
+  assert(Tray.step() === 2, 'picking the main should go straight to the assembled tray');
   const html = Tray.render();
-  assert(/data-act="bread" aria-pressed="true"/.test(html), 'bread toggle should start on');
+  assert(/Main/.test(html) && /Side/.test(html) && /Shelf/.test(html), 'all slots should show');
+  assert((html.match(/data-act="swap"/g) || []).length >= 3, 'every predicted line must be swappable');
   Tray.stop();
-  return 'on';
+  return 'main, side, two from the shelf, bread';
 });
 
-t('a full tray is reachable in five taps from the Today screen', () => {
-  /* slot, plat, garniture, pair, confirm. Each of these is one tap and each advances. */
-  Tray.start('lunch');                                             /* tap 1: the slot card */
-  Tray.onAct('plat', { id: 'turkey_madras' }, null, () => {}, () => {});   /* tap 2 */
-  assert(Tray.step() === 2, 'picking the plat should advance to step 2');
-  Tray.onAct('garn', { id: 'semolina' }, null, () => {}, () => {});        /* tap 3 */
-  assert(Tray.step() === 3, 'picking the garniture should advance to step 3');
-  const html = Tray.render();                                      /* tap 4 is a pair card */
-  assert(/data-act="pair" data-i="0"/.test(html), 'a one-tap pair must be on screen');
-  assert(/data-act="save"/.test('<button data-act="save">'), 'tap 5 is the confirm button');
+t('the bread roll is on by default and comes off in one tap', () => {
+  Tray.start('lunch');
+  Tray.onAct('plat', { id: 'turkey_madras' }, null, () => {}, () => {});
+  assert(/Bread roll/.test(Tray.render()), 'bread should start on the tray');
+  Tray.onAct('bread', {}, null, () => {}, () => {});
+  assert(/Left behind/.test(Tray.render()), 'and come off when removed');
   Tray.stop();
-  return '5';
+  return 'on by default';
+});
+
+t('a tray is four taps from the Today screen', () => {
+  /* add a meal -> canteen tray -> the main -> confirm. Nothing in between. */
+  Tray.start('lunch');                                                    /* taps 1 and 2 */
+  Tray.onAct('plat', { id: 'turkey_madras' }, null, () => {}, () => {});  /* tap 3 */
+  assert(Tray.step() === 2, 'there should be no intermediate step');
+  assert(/data-act="save"/.test(Tray.dock()), 'tap 4 is the confirm button in the dock');
+  Tray.stop();
+  return '4';
 });
 
 /* ---------- data integrity -------------------------------------------------------- */
+
+g('Tray prediction');
+
+const GARN = () => FOODS.filter(f => f.category === 'garniture');
+const lunchNeed = () => R.slotNeed('lunch', M.ZERO, SLOT_ORDER, TARGETS, SLOT_PLAN);
+const lunchFloors = () => M.floorsFor(SLOT_PLAN.lunch);
+
+function predictFor(id, history) {
+  return P.predictTray(BY_ID[id], {
+    garniturePool: GARN(), periphPool: STAPLES,
+    need: lunchNeed(), floors: lunchFloors(), bread: BREAD, history
+  });
+}
+
+t('the observed prior matches what CROUS actually serves most', () => {
+  const top = Object.entries(OBSERVED_FREQ).sort((a, b) => b[1] - a[1]).slice(0, 3).map(e => e[0]);
+  assert(top.includes('rice') && top.includes('semolina'),
+    'rice and semolina should lead, got ' + top.join(', '));
+  return top.join(' > ');
+});
+
+t('cuisine tags come out of the dish name', () => {
+  assert(tagsFor(BY_ID.turkey_madras).includes('curry'), 'madras is a curry');
+  assert(tagsFor(BY_ID.merguez).includes('maghreb'), 'merguez is maghreb');
+  assert(tagsFor(BY_ID.fish_fillet).includes('fish'), 'colin is fish');
+  assert(affinity(['curry'], 'rice') === 2, 'curry and rice are classic');
+  assert(affinity(['curry'], 'chips') === -1, 'curry and chips are not');
+});
+
+t('a curry is given rice or semolina, never chips', () => {
+  const p = predictFor('turkey_madras');
+  assert(['rice', 'semolina', 'boulgour_pilaf'].includes(p.garniture.id), 'got ' + p.garniture.id);
+  return p.garniture.en;
+});
+
+t('a grilled or breaded main is given chips or potato', () => {
+  const ok = ['chips', 'mash', 'pommes_de_terre_au_four', 'pommes_de_terre_vapeur'];
+  for (const id of ['toulouse', 'beef_patty', 'roast_pork', 'cordon_bleu']) {
+    const p = predictFor(id);
+    assert(ok.includes(p.garniture.id), `${id} got ${p.garniture.id}`);
+  }
+  return 'chips';
+});
+
+t('merguez is given semolina, and still carries its warning', () => {
+  const p = predictFor('merguez');
+  assert(p.garniture.id === 'semolina', 'got ' + p.garniture.id);
+  assert(p.warning && /286/.test(p.warning), 'the warning should survive the prediction');
+  return p.garniture.en;
+});
+
+t('a full plate is not given a garniture', () => {
+  const pizza = FOODS.find(f => f.selfContained && f.family === 'pasta_pizza');
+  assert(predictFor(pizza.id).garniture === null, `${pizza.en} should get none`);
+  return pizza.en;
+});
+
+t('what you actually took beats the pairing table', () => {
+  /* Mash is a poor match for a curry, so only history can put it there. */
+  const cold = predictFor('turkey_madras').garniture.id;
+  assert(cold !== 'mash', 'mash should not be the cold-start answer');
+  const warm = predictFor('turkey_madras', id => (id === 'mash' ? 4 : 0)).garniture.id;
+  assert(warm === 'mash', 'four confirmations should win, got ' + warm);
+  return `${cold} until four confirmations, then mash`;
+});
+
+t('a predicted tray lands near what the slot was planned to deliver', () => {
+  const out = [];
+  for (const id of ['turkey_madras', 'toulouse', 'roast_pork', 'beef_patty', 'merguez', 'fish_fillet']) {
+    const p = predictFor(id);
+    assert(p.periph.length === 2, `${id} should get two shelf items`);
+    const tot = M.sum([BY_ID[id].macros, p.garniture ? p.garniture.macros : M.ZERO,
+                       BREAD.macros, ...p.periph.map(i => i.macros)]);
+    assert(tot.kcal >= 700 && tot.kcal <= 1250,
+      `${id} predicted ${Math.round(tot.kcal)} against a ${SLOT_PLAN.lunch.kcal} plan`);
+    out.push(Math.round(tot.kcal));
+  }
+  return `${Math.min(...out)}–${Math.max(...out)} kcal`;
+});
+
+t('the prediction is not the same two shelf items for every main', () => {
+  const sets = ['turkey_madras', 'toulouse', 'fish_fillet', 'cordon_bleu']
+    .map(id => predictFor(id).periph.map(i => i.id).sort().join(' + '));
+  assert(new Set(sets).size > 1, 'every main gave ' + sets[0]);
+  return `${new Set(sets).size} distinct answers from 4 mains`;
+});
+
+t('a fatty main still keeps the chocolate off the shelf', () => {
+  const p = predictFor('toulouse');
+  assert(!p.periph.some(i => i.id.startsWith('choc')), 'chocolate got through');
+  assert(p.indulgence === null, 'and no note inviting it');
+});
+
+t('swapping never offers what is already on the tray', () => {
+  const p = predictFor('turkey_madras');
+  const keep = [p.periph[0]];
+  const list = P.swapCandidates('periph', {
+    plat: BY_ID.turkey_madras, periphPool: STAPLES, garniturePool: GARN(),
+    need: lunchNeed(), floors: lunchFloors(), keep
+  });
+  assert(!list.some(i => i.id === keep[0].id), 'the kept item came back as a candidate');
+  assert(list.length > 5, 'there should be plenty to choose from');
+  return `${list.length} alternatives`;
+});
+
+t('swapping the garniture offers the likely ones first', () => {
+  const list = P.swapCandidates('garniture', { plat: BY_ID.merguez, garniturePool: GARN() });
+  assert(list[0].id === 'semolina', 'got ' + list[0].id);
+  return list.slice(0, 3).map(i => i.en).join(', ');
+});
 
 g('Data (§13)');
 
@@ -313,11 +443,11 @@ t('every estimated item is marked in the UI, and no other item is', () => {
   const est = FOODS.filter(f => f.estimated);
   assert(est.length >= 3, `expected at least 3 estimated items, got ${est.length}`);
   for (const f of est) {
-    assert(/class="est"/.test(dishCard(f)), `${f.id} does not show its marker`);
+    assert(/class="est"/.test(tile(f)), `${f.id} does not show its marker`);
   }
   const notEst = FOODS.filter(f => !f.estimated).slice(0, 25);
   for (const f of notEst) {
-    assert(!/class="est"/.test(dishCard(f)), `${f.id} wrongly shows an est. marker`);
+    assert(!/class="est"/.test(tile(f)), `${f.id} wrongly shows an est. marker`);
   }
   return est.map(f => f.id).join(', ');
 });

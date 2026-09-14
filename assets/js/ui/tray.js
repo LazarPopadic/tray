@@ -1,87 +1,110 @@
-/* The tray builder: three steps, then a confirm sheet.
-   Fast path from the Today screen is 5 taps — slot, plat, garniture, pair, confirm. */
+/* The canteen tray.
+
+   Two steps, not three. Pick the main; the app predicts the rest of the tray and
+   shows it assembled, each line swappable in one tap. From the Today screen that is
+   four taps to a logged meal — add, tray, main, confirm — and correcting a wrong
+   prediction costs one more, never a restart. */
 
 import * as S from '../lib/store.js';
 import * as M from '../lib/macros.js';
 import * as R from '../lib/recommend.js';
-import { FOODS, BY_ID, PLATS, GARNITURES, PERIPH, STAPLES, FAMILIES, BREAD, food } from '../data/foods.js';
-import { SLOT_ORDER, SLOT_LABEL, PORTION_SCALES, rankOf } from '../config.js';
-import { esc, n0, macroLine, dishCard, pairCard, chipRow, openSheet, closeSheet,
-         meter, estTag, sign } from './common.js';
+import * as P from '../lib/predict.js';
+import { FOODS, PLATS, GARNITURES, PERIPH, STAPLES, FAMILIES, BREAD, food } from '../data/foods.js';
+import { SLOT_ORDER, SLOT_LABEL, SLOT_SHORT, PORTION_SCALES } from '../config.js';
+import { esc, n0, macroLine, tile, tiles, trayRow, chipRow, steps,
+         openSheet, closeSheet, delta, estTag } from './common.js';
+import { nearestSlot } from '../lib/dates.js';
 
 let B = null;
-let lastPairs = [];
 
 export function start(slot) {
-  B = { slot, step: 1, platId: null, garnitureIds: [], periphIds: [],
-        bread: true, scale: 'normal', family: 'recent', query: '',
-        multiGarniture: false, custom: null, showShelf: false };
+  const key = S.today();
+  const logged = S.loggedSlots(key);
+  const open = ['lunch', 'dinner'].filter(s => !logged.includes(s));
+  B = {
+    slot: slot || nearestSlot(open.length ? open : ['lunch', 'dinner']) || 'lunch',
+    step: 1, platId: null, garnitureId: null, periphIds: [],
+    bread: true, scale: 'normal', family: 'recent', query: '',
+    custom: null, prediction: null
+  };
 }
 
 export function stop() { B = null; }
 export function active() { return !!B; }
 export function currentSlot() { return B ? B.slot : null; }
 export function step() { return B ? B.step : 0; }
-
 export function back() {
   if (!B) return false;
-  if (B.step > 1) { B.step--; return true; }
+  if (B.step > 1) { B.step = 1; return true; }
   return false;
 }
 
-/* ---------- pools ------------------------------------------------------------ */
-
-function availability() {
-  const a = S.settings().availability;
-  return a && a.periph ? new Set(a.periph) : null;
-}
+/* ---------- pools ------------------------------------------------------------------ */
 
 function periphPool() {
-  const base = S.settings().fullCatalogue ? PERIPH : STAPLES;
-  const av = availability();
-  return av ? base.filter(f => av.has(f.id)) : base;
+  const st = S.settings();
+  const base = st.fullCatalogue ? PERIPH : STAPLES;
+  const av = st.availability && st.availability.periph ? new Set(st.availability.periph) : null;
+  const pool = av ? base.filter(f => av.has(f.id)) : base;
+  return pool.length >= 4 ? pool : base;
 }
 
-function trayItems() {
-  const ids = [B.platId, ...B.garnitureIds, ...B.periphIds].filter(Boolean);
-  const items = ids.map(food).filter(Boolean);
-  if (B.bread && BREAD) items.push(BREAD);
-  return items;
+function garniturePool() {
+  const st = S.settings();
+  const av = st.availability && st.availability.garniture
+    ? new Set(st.availability.garniture) : null;
+  const pool = av ? GARNITURES.filter(f => av.has(f.id)) : GARNITURES;
+  return pool.length ? pool : GARNITURES;
 }
 
-function trayMacros() {
-  const base = M.sum(trayItems().map(i => i.macros));
+/* What this meal still owes the day (§7.3). */
+function need() {
+  const key = S.today();
+  const logged = S.loggedSlots(key);
+  const unlogged = SLOT_ORDER.filter(s => !logged.includes(s) || s === B.slot);
+  return R.slotNeed(B.slot, S.dayTotals(key), unlogged, S.settings().targets, S.settings().slotPlan);
+}
+
+function items() {
+  const list = [B.platId, B.garnitureId, ...B.periphIds].filter(Boolean).map(food).filter(Boolean);
+  if (B.bread && BREAD) list.push(BREAD);
+  return list;
+}
+
+function macros() {
+  const base = M.sum(items().map(i => i.macros));
   const withCustom = B.custom ? M.add(base, B.custom.macros) : base;
   const f = (PORTION_SCALES.find(p => p.id === B.scale) || { factor: 1 }).factor;
   return M.scale(withCustom, f);
 }
 
-/* What this meal still owes the day, minus what is already on the tray. */
-function need() {
-  const key = S.today();
-  const logged = S.loggedSlots(key);
-  const unlogged = SLOT_ORDER.filter(s => !logged.includes(s) || s === B.slot);
-  const raw = R.slotNeed(B.slot, S.dayTotals(key), unlogged, S.settings().targets, S.settings().slotPlan);
-  const onTray = M.sum([
-    B.platId ? food(B.platId).macros : M.ZERO,
-    ...B.garnitureIds.map(id => food(id).macros),
-    B.bread && BREAD ? BREAD.macros : M.ZERO
-  ]);
-  return M.clampPositive(M.sub(raw, onTray), 2);
+function floors() {
+  return M.floorsFor(S.settings().slotPlan[B.slot]);
 }
 
-/* ---------- step 1: the meat -------------------------------------------------- */
+function predict() {
+  const plat = food(B.platId);
+  B.prediction = P.predictTray(plat, {
+    floors: floors(),
+    garniturePool: garniturePool(),
+    periphPool: periphPool(),
+    need: need(),
+    bread: B.bread ? BREAD : null,
+    history: S.pairHistory(B.platId),
+    periphHistory: S.anyPairHistory()
+  });
+  B.garnitureId = B.prediction.garniture ? B.prediction.garniture.id : null;
+  B.periphIds = B.prediction.periph.map(i => i.id);
+}
+
+/* ---------- step 1: the main ---------------------------------------------------------- */
 
 function platList() {
   const q = B.query.trim().toLowerCase();
-  if (q) {
-    return FOODS.filter(f => f.category === 'plat' &&
-      (f.en.toLowerCase().includes(q) || f.fr.toLowerCase().includes(q)));
-  }
+  if (q) return PLATS.filter(f => f.en.toLowerCase().includes(q) || f.fr.toLowerCase().includes(q));
   if (B.family === 'recent') {
-    const ids = S.recent('plat');
-    const seen = ids.map(food).filter(f => f && f.category === 'plat');
-    return seen.length ? seen : PLATS.slice(0, 12);
+    const seen = S.recent('plat').map(food).filter(f => f && f.category === 'plat');
+    return seen.length ? seen.slice(0, 10) : PLATS.slice(0, 10);
   }
   if (B.family === 'all') return PLATS;
   return PLATS.filter(f => f.family === B.family);
@@ -90,284 +113,270 @@ function platList() {
 function renderStep1() {
   const list = platList();
   const chips = [['recent', 'Recent'], ...FAMILIES, ['all', `All ${PLATS.length}`]];
-  const empty = B.family === 'recent' && !S.recent('plat').length
-    ? '<div class="note">Nothing logged yet, so these are the best options by protein. Once you have logged a few, what you actually eat comes first.</div>'
-    : '';
+  const fresh = B.family === 'recent' && !S.recent('plat').length;
   return `
-    <h2>What is the meat?</h2>
-    <p class="small muted" style="margin:4px 0 10px">Pick what you can see on the counter.</p>
+    <h2>What is the main?</h2>
+    <p class="small muted">Pick what you can see on the counter. Everything else follows from it.</p>
     ${chipRow(chips, B.query ? null : B.family, 'fam')}
-    <input class="search" type="search" placeholder="Search ${PLATS.length} dishes…"
-           value="${esc(B.query)}" data-act="q" autocomplete="off" autocorrect="off">
-    <div style="height:10px"></div>
-    ${empty}
-    <div class="dishes">
-      ${list.map(f => dishCard(f, { act: 'plat' })).join('')}
-      ${list.length ? '' : '<div class="note">Nothing matches. Try the French name.</div>'}
-    </div>
-    <div style="height:10px"></div>
-    <button class="btn wide ghost" data-act="freeplat">Something else — enter it by hand</button>`;
+    <input class="search" type="search" placeholder="Search ${PLATS.length} dishes"
+      value="${esc(B.query)}" data-act="q" autocomplete="off" autocorrect="off"
+      aria-label="Search main dishes">
+    <div style="height:var(--s3)"></div>
+    ${fresh ? '<div class="note" style="margin-bottom:var(--s3)">Best options by protein for now. Once you have logged a few trays, what you actually eat comes first.</div>' : ''}
+    ${tiles(list, { act: 'plat', empty: 'Nothing matches. Try the French name.' })}
+    <div style="height:var(--s3)"></div>
+    <button class="btn wide ghost" data-act="freeplat">Not on the list — enter it by hand</button>`;
 }
 
-/* ---------- step 2: the garniture --------------------------------------------- */
+/* ---------- step 2: the predicted tray -------------------------------------------------- */
 
 function renderStep2() {
   const plat = food(B.platId);
-  const warn = R.platWarning(plat);
-  const ranked = R.rankGarnitures(GARNITURES);
-  const best = ranked[0];
-  const veg = R.vegetableWarning(GARNITURES);
-  const solo = plat && plat.selfContained;
-
-  return `
-    <div class="note" style="margin-bottom:12px">
-      <b>${esc(plat.en)}</b> · ${macroLine(plat.macros)}
-    </div>
-    ${warn ? `<div class="warn" style="margin-bottom:12px">${esc(warn)}</div>` : ''}
-    <h2>And the garniture?</h2>
-    <p class="small muted" style="margin:4px 0 10px">
-      It comes with the plat. It is not one of your two — this is the part most people get wrong.
-    </p>
-    ${solo ? `<div class="note" style="margin-bottom:10px">${esc(plat.en)} is served as a full plate, so there is
-      probably no separate garniture. Skip unless you see one.</div>` : ''}
-    <div class="row between" style="margin-bottom:8px">
-      <button class="chip${B.multiGarniture ? ' on' : ''}" data-act="multi"
-              aria-pressed="${B.multiGarniture}">Take more than one</button>
-      ${B.multiGarniture || solo ? '<button class="btn" data-act="gnext">Next</button>' : ''}
-    </div>
-    <div class="dishes">
-      ${ranked.filter(g => g.starchy).map((g, i) => dishCard(g, {
-        act: 'garn',
-        selected: B.garnitureIds.includes(g.id),
-        className: i === 0 ? 'pick' : '',
-        flag: i === 0 ? 'Take this' : null,
-        reason: R.garnitureReason(g, i === 0, best),
-        showLook: i === 0
-      })).join('')}
-    </div>
-    ${veg ? `<div class="section-title">Vegetables</div>
-      <div class="note" style="margin-bottom:8px">${esc(veg)}</div>` : ''}
-    <div class="dishes">
-      ${ranked.filter(g => !g.starchy).map(g => dishCard(g, {
-        act: 'garn',
-        selected: B.garnitureIds.includes(g.id),
-        showLook: false
-      })).join('')}
-    </div>
-    <div style="height:10px"></div>
-    <button class="btn wide ghost" data-act="nogarn">No garniture today</button>`;
-}
-
-/* ---------- step 3: the two --------------------------------------------------- */
-
-function renderStep3() {
-  const plat = food(B.platId);
-  const platFat = plat ? plat.macros.fat : 0;
-  const nd = need();
-  const pool = periphPool();
-  const key = S.today();
-  const pairs = R.recommendPairs(pool, nd, {
-    platFat, platName: plat ? plat.en : ''
-  }, 3);
-  lastPairs = pairs;
-  const note = R.indulgenceNote(platFat, pool, nd);
-  const pNote = R.proteinNote(S.dayTotals(key), S.loggedSlots(key), S.settings().slotPlan);
-  const chosen = B.periphIds;
-  const rest = (S.settings().fullCatalogue ? PERIPH : pool)
-    .filter(f => !chosen.includes(f.id))
-    .sort((a, b) => rankOf(b.macros).localeCompare(rankOf(a.macros)) || b.macros.protein - a.macros.protein);
-
-  return `
-    <h2>Pick your two</h2>
-    <p class="small muted" style="margin:4px 0 10px">
-      Any mix from the cold shelf, the dairy and the desserts.
-    </p>
-    ${pNote ? `<div class="note" style="margin-bottom:10px">${esc(pNote)}</div>` : ''}
-    ${note ? `<div class="note" style="margin-bottom:10px">${esc(note)}</div>` : ''}
-    ${chosen.length ? '' : `<div class="dishes">${pairs.map(pairCard).join('')}</div>`}
-
-    <div class="section-title">${chosen.length ? `Chosen (${chosen.length} of 2)` : 'Or pick them yourself'}</div>
-    ${chosen.length ? `<div class="dishes">${chosen.map(id =>
-        dishCard(food(id), { act: 'unpick', selected: true })).join('')}</div><div style="height:8px"></div>` : ''}
-    ${chosen.length < 2 ? `<div class="dishes">${rest.slice(0, 40).map(f =>
-        dishCard(f, { act: 'periph' })).join('')}</div>` : ''}
-
-    <div class="section-title">Bread</div>
-    <button class="dish${B.bread ? ' pick' : ''}" data-act="bread" aria-pressed="${B.bread}">
-      <div class="en">${B.bread ? '&#10003; ' : ''}Bread roll${estTag(BREAD)}</div>
-      <div class="fr">Petit pain · 60 g · in the formula whether you take it or not</div>
-      <div class="figs"><div class="k">${n0(BREAD.macros.kcal)}</div><div class="p">${n0(BREAD.macros.protein)} g P</div></div>
-    </button>
-
-    <details style="margin-top:14px" ${B.showShelf ? 'open' : ''}>
-      <summary>What is actually on the shelf today?</summary>
-      <p class="tiny muted">Deselect anything missing. Remembered for next time. Skip it and everything counts.</p>
-      <div class="wrap-row">${pool.concat(STAPLES.filter(s => !pool.includes(s))).map(f => {
-        const on = pool.includes(f);
-        return `<button class="chip ${on ? '' : 'off'}" data-act="avail" data-id="${esc(f.id)}">${esc(f.en)}</button>`;
-      }).join('')}</div>
-    </details>`;
-}
-
-/* ---------- confirm ------------------------------------------------------------ */
-
-function confirmSheet() {
-  const key = S.today();
-  const before = S.dayTotals(key);
-  const add = trayMacros();
+  const pr = B.prediction || {};
+  const g = B.garnitureId ? food(B.garnitureId) : null;
+  const per = B.periphIds.map(food).filter(Boolean);
+  const before = S.dayTotals(S.today());
+  const add = macros();
   const after = M.add(before, add);
   const t = S.settings().targets;
-  const items = trayItems();
-  const logged = S.loggedSlots(key);
-  const target = B.slot;
+  const learned = B.platId && S.pairCount(B.platId, B.garnitureId) > 0;
 
-  return openSheet(`
-    <h2>Your tray</h2>
-    <div style="margin-top:10px">
-      ${items.map(i => `<div class="tray-line">
-          <span class="n">${esc(i.en)}${estTag(i)}</span>
-          <span class="num muted">${n0(i.macros.kcal)} kcal</span>
-        </div>`).join('')}
-      ${B.custom ? `<div class="tray-line"><span class="n">${esc(B.custom.name)}</span>
-          <span class="num muted">${n0(B.custom.macros.kcal)} kcal</span></div>` : ''}
-      <div class="tray-total"><span>Tray</span><span class="num">${macroLine(add)}</span></div>
+  /* Every advisory line is derived from what is on the tray right now, not from the
+     original prediction — otherwise swapping to the semolina leaves the app still
+     arguing for the semolina. */
+  const advice = P.garnitureAdvice(g, garniturePool());
+  const remaining = M.clampPositive(M.sub(need(), M.sum(
+    [plat ? plat.macros : M.ZERO, g ? g.macros : M.ZERO,
+     B.bread ? BREAD.macros : M.ZERO])), floors());
+  const reason = per.length === 2
+    ? R.pairReason(per[0], per[1], remaining,
+        { platFat: plat ? plat.macros.fat : 0, platName: plat ? plat.en : '' })
+    : null;
+  const indulgence = per.some(i => i.macros.fat >= 8)
+    ? null
+    : R.indulgenceNote(plat ? plat.macros.fat : 0, periphPool(), remaining);
+
+  return `
+    <h2>Probably on your tray</h2>
+    <p class="small muted">Change any line, or confirm the lot.</p>
+
+    ${pr.warning ? `<div class="note warn">${esc(pr.warning)}</div><div style="height:var(--s3)"></div>` : ''}
+
+    <div class="tray">
+      ${trayRow('Main', plat, { swap: 'plat' })}
+      ${plat && plat.selfContained && !g
+        ? trayRow('Side', null, { swap: 'garniture', emptyText: 'Served as a full plate' })
+        : trayRow('Side', g, {
+            swap: 'garniture',
+            why: learned ? 'What you usually take with this.' : (advice || null),
+            emptyText: 'No garniture' })}
+      ${trayRow('Shelf', per[0], { swap: 'periph', index: 0, emptyText: 'Nothing chosen' })}
+      ${trayRow('Shelf', per[1], { swap: 'periph', index: 1, emptyText: 'Nothing chosen' })}
+      <div class="trayrow${B.bread ? '' : ' none'}">
+        <span class="slotname label">Bread</span>
+        <span class="what">
+          <span class="n">${B.bread ? `Bread roll${estTag(BREAD)}` : 'Left behind'}</span>
+          <span class="m">${B.bread ? `${n0(BREAD.macros.kcal)} kcal · ${n0(BREAD.macros.protein)} P`
+            : 'in the formula whether you take it or not'}</span>
+        </span>
+        <button class="btn sm ghost" data-act="bread">${B.bread ? 'Remove' : 'Take it'}</button>
+      </div>
+      ${B.custom ? `<div class="trayrow">
+        <span class="slotname label">Added</span>
+        <span class="what"><span class="n">${esc(B.custom.name)}</span>
+          <span class="m">${macroLine(B.custom.macros)}</span></span>
+        <button class="btn sm ghost" data-act="dropcustom">Remove</button>
+      </div>` : ''}
+      <div class="traytotal">
+        <span class="label">Whole tray</span>
+        <span class="v">${n0(add.kcal)} kcal</span>
+      </div>
+      <div class="small muted num" style="margin-top:var(--s1)">${
+        n0(add.protein)} g protein &middot; ${n0(add.fat)} g fat &middot; ${n0(add.carbs)} g carbs</div>
     </div>
 
-    <div class="section-title">How big was it, really?</div>
-    <div class="wrap-row">
-      ${PORTION_SCALES.map(p => `<button class="chip${B.scale === p.id ? ' on' : ''}"
-        data-act="scale" data-v="${p.id}">${p.label}</button>`).join('')}
-    </div>
-    <p class="tiny muted" style="margin-top:6px">CROUS portions swing about ±15% depending on who is serving.</p>
+    ${reason ? `<div style="height:var(--s3)"></div>
+      <div class="note"><b>The two from the shelf.</b> ${esc(reason)}</div>` : ''}
 
-    <div class="section-title">Day total</div>
-    <div class="beforeafter">
-      <span class="num">${n0(before.kcal)} kcal</span> &rarr;
-      <b class="num">${n0(after.kcal)} kcal</b>
-      <span class="muted">of ${n0(t.kcal)}</span>
-    </div>
-    <div class="beforeafter" style="margin-top:4px">
-      <span class="num">${n0(before.protein)} g P</span> &rarr;
-      <b class="num">${n0(after.protein)} g P</b>
-      <span class="muted">of ${n0(t.protein)}</span>
+    ${indulgence ? `<div style="height:var(--s3)"></div><div class="note">${esc(indulgence)}</div>` : ''}
+
+    <div class="section">
+      <span class="label">How big was it</span>
+      <div class="wrap-row">
+        ${PORTION_SCALES.map(p => `<button class="chip${B.scale === p.id ? ' on' : ''}"
+          data-act="scale" data-v="${p.id}" aria-pressed="${B.scale === p.id}">${p.label}</button>`).join('')}
+      </div>
+      <p class="tiny muted" style="margin-top:var(--s2)">
+        CROUS portions swing about ±15% depending on who is serving. Normal is the published figure.
+      </p>
     </div>
 
-    <div style="height:16px"></div>
-    <button class="btn primary wide" data-act="save" data-slot="${target}">
-      Add to ${SLOT_LABEL[target].toLowerCase()}
-    </button>
-    <div style="height:8px"></div>
-    <div class="row">
-      ${['lunch', 'dinner'].filter(s => s !== target).map(s =>
-        `<button class="btn grow" data-act="save" data-slot="${s}">Add to ${s} instead</button>`).join('')}
-      <button class="btn grow ghost" data-act="cancel">Cancel</button>
+    <div class="section">
+      <span class="label">Log it as</span>
+      <div class="wrap-row">
+        ${['lunch', 'dinner'].map(s => `<button class="chip${B.slot === s ? ' on' : ''}"
+          data-act="slot" data-v="${s}" aria-pressed="${B.slot === s}">${SLOT_LABEL[s]}</button>`).join('')}
+      </div>
     </div>
-    ${logged.includes(target) ? `<p class="tiny muted center" style="margin-top:8px">
-      You have already logged ${esc(SLOT_LABEL[target].toLowerCase())} today — this will be added on top.</p>` : ''}
-  `);
+
+    <div class="section">
+      <span class="label">Day after this</span>
+      ${delta(before.kcal, after.kcal, t.kcal, ' kcal')}
+      <div style="height:var(--s1)"></div>
+      ${delta(before.protein, after.protein, t.protein, ' g protein')}
+    </div>
+
+    <div style="height:var(--s3)"></div>
+    <button class="btn wide ghost" data-act="addmore">Add something else to the tray</button>`;
 }
 
-/* ---------- free entry ---------------------------------------------------------- */
+/* ---------- swapping ---------------------------------------------------------------------- */
 
-function freeSheet(kind) {
+function swapSheet(slot, index) {
+  const plat = food(B.platId);
+  if (slot === 'plat') {
+    B.step = 1;
+    closeSheet();
+    return true;
+  }
+  const keep = slot === 'periph'
+    ? B.periphIds.filter((_, i) => i !== Number(index)).map(food)
+    : [];
+  const list = P.swapCandidates(slot, {
+    plat,
+    garniturePool: garniturePool(),
+    periphPool: periphPool(),
+    need: M.clampPositive(M.sub(need(), M.sum(
+      [plat ? plat.macros : M.ZERO, B.bread ? BREAD.macros : M.ZERO,
+       slot === 'periph' && B.garnitureId ? food(B.garnitureId).macros : M.ZERO])), floors()),
+    floors: floors(),
+    keep,
+    history: S.pairHistory(B.platId),
+    periphHistory: S.anyPairHistory()
+  });
+  const current = slot === 'garniture' ? B.garnitureId : B.periphIds[Number(index)];
+
+  openSheet(`
+    <h2>${slot === 'garniture' ? 'What came with it?' : 'From the shelf'}</h2>
+    <p class="small muted">${slot === 'garniture'
+      ? 'Best guesses first, based on what usually goes with this dish and what you have taken before.'
+      : 'Ordered by what this meal still needs.'}</p>
+    <div class="tiles">${list.slice(0, 24).map(it => tile(it, {
+      act: 'choose',
+      data: { slot, i: index == null ? '' : index },
+      selectable: true,
+      selected: it.id === current
+    })).join('')}</div>
+    <div style="height:var(--s3)"></div>
+    ${slot === 'garniture'
+      ? '<button class="btn wide ghost" data-act="nogarn">No garniture today</button>'
+      : '<button class="btn wide ghost" data-act="noperiph" data-i="' + index + '">Leave this one empty</button>'}
+  `, { label: 'Choose' });
+  return false;
+}
+
+function freeSheet(target) {
   return openSheet(`
     <h2>Enter it by hand</h2>
-    <p class="small muted">For anything the counter served that is not in the catalogue.</p>
+    <p class="small muted">For whatever the counter served that is not in the catalogue.</p>
     <div class="field"><label for="c_name">What was it</label>
-      <input id="c_name" type="text" placeholder="e.g. lamb tagine"></div>
-    <div class="field"><label for="c_k">kcal</label>
-      <input id="c_k" type="number" inputmode="numeric" value="0"></div>
-    <div class="field"><label for="c_p">Protein (g)</label>
-      <input id="c_p" type="number" inputmode="decimal" value="0"></div>
-    <div class="field"><label for="c_f">Fat (g)</label>
-      <input id="c_f" type="number" inputmode="decimal" value="0"></div>
-    <div class="field"><label for="c_c">Carbs (g)</label>
-      <input id="c_c" type="number" inputmode="decimal" value="0"></div>
-    <div style="height:12px"></div>
-    <button class="btn primary wide" data-act="freesave" data-kind="${kind}">Add it</button>
-  `);
+      <input id="c_name" type="text" placeholder="lamb tagine"></div>
+    ${[['c_k', 'kcal'], ['c_p', 'Protein (g)'], ['c_f', 'Fat (g)'], ['c_c', 'Carbs (g)']]
+      .map(([id, lab]) => `<div class="field"><label for="${id}">${lab}</label>
+        <input id="${id}" type="number" inputmode="decimal" value="0"></div>`).join('')}
+    <div style="height:var(--s3)"></div>
+    <button class="btn primary wide" data-act="freesave" data-target="${target}">Add it</button>
+  `, { label: 'Enter macros by hand' });
 }
 
-/* ---------- render + actions ------------------------------------------------------ */
+/* ---------- shell ------------------------------------------------------------------------- */
+
+export const hasDock = true;
+
+export function dock() {
+  if (!B || B.step === 1) return '';
+  const add = macros();
+  return `<button class="btn primary big wide" data-act="save">
+    Add to ${esc(SLOT_SHORT[B.slot])} &middot; ${n0(add.kcal)} kcal</button>`;
+}
 
 export function render() {
   if (!B) return '';
-  if (B.step === 1) return renderStep1();
-  if (B.step === 2) return renderStep2();
-  return renderStep3();
+  return B.step === 1 ? renderStep1() : renderStep2();
 }
 
-export function title() {
-  return B ? `${SLOT_LABEL[B.slot]} · step ${B.step} of 3` : '';
-}
+export function title() { return B ? SLOT_LABEL[B.slot] : 'Tray'; }
+export function sub() { return B ? steps(B.step, 2) : ''; }
 
 export function onAct(act, ds, e, rerender, go) {
   switch (act) {
-    case 'fam':   B.family = ds.v; B.query = ''; return rerender();
-    case 'q':     B.query = e.target.value; return rerender({ keepFocus: 'q' });
-    case 'plat':  B.platId = ds.id; B.step = 2; return rerender();
-    case 'multi': B.multiGarniture = !B.multiGarniture; return rerender();
-    case 'garn': {
-      if (B.multiGarniture) {
-        const i = B.garnitureIds.indexOf(ds.id);
-        if (i >= 0) B.garnitureIds.splice(i, 1); else B.garnitureIds.push(ds.id);
-        return rerender();
-      }
-      B.garnitureIds = [ds.id]; B.step = 3; return rerender();
+    case 'fam': B.family = ds.v; B.query = ''; return rerender();
+    case 'q': B.query = e.target.value; return rerender({ keepFocus: 'q' });
+
+    case 'plat':
+      B.platId = ds.id;
+      predict();
+      B.step = 2;
+      return rerender();
+
+    case 'swap': {
+      if (swapSheet(ds.slot, ds.i)) return rerender();
+      return;
     }
-    case 'gnext': B.step = 3; return rerender();
-    case 'nogarn': B.garnitureIds = []; B.step = 3; return rerender();
-    case 'pair': {
-      const p = lastPairs[Number(ds.i)];
-      B.periphIds = [p.a.id, p.b.id];
-      return confirmSheet();
-    }
-    case 'periph': {
-      if (B.periphIds.length >= 2) return;
-      B.periphIds.push(ds.id);
-      if (B.periphIds.length === 2) { rerender(); return confirmSheet(); }
+    case 'choose': {
+      if (ds.slot === 'garniture') B.garnitureId = ds.id;
+      else B.periphIds[Number(ds.i)] = ds.id;
+      closeSheet();
       return rerender();
     }
-    case 'unpick':
-      B.periphIds = B.periphIds.filter(x => x !== ds.id);
-      return rerender();
+    case 'nogarn': B.garnitureId = null; closeSheet(); return rerender();
+    case 'noperiph': B.periphIds.splice(Number(ds.i), 1); closeSheet(); return rerender();
+
     case 'bread': B.bread = !B.bread; return rerender();
-    case 'avail': {
-      const s = S.settings();
-      const cur = new Set((s.availability && s.availability.periph) || STAPLES.map(f => f.id));
-      if (cur.has(ds.id)) cur.delete(ds.id); else cur.add(ds.id);
-      S.setSettings({ availability: { ...(s.availability || {}), periph: [...cur] } });
-      B.showShelf = true;
-      return rerender();
-    }
-    case 'scale': B.scale = ds.v; closeSheet(); return confirmSheet();
-    case 'cancel': return closeSheet();
+    case 'scale': B.scale = ds.v; return rerender();
+    case 'slot': B.slot = ds.v; return rerender();
+    case 'addmore': return freeSheet('extra');
     case 'freeplat': return freeSheet('plat');
+    case 'dropcustom': B.custom = null; return rerender();
+
     case 'freesave': {
       const v = id => Number(document.getElementById(id).value) || 0;
       const name = document.getElementById('c_name').value.trim() || 'Something else';
       B.custom = { name, macros: { kcal: v('c_k'), protein: v('c_p'), fat: v('c_f'), carbs: v('c_c') } };
       closeSheet();
-      B.step = 2;
-      B.platId = B.platId || null;
+      if (ds.target === 'plat' && !B.platId) {
+        B.prediction = P.predictTray(null, {
+          floors: floors(),
+          garniturePool: garniturePool(), periphPool: periphPool(), need: need(),
+          bread: B.bread ? BREAD : null, periphHistory: S.anyPairHistory()
+        });
+        B.garnitureId = B.prediction.garniture ? B.prediction.garniture.id : null;
+        B.periphIds = B.prediction.periph.map(i => i.id);
+        B.step = 2;
+      }
       return rerender();
     }
+
+    case 'cancel': return closeSheet();
+
     case 'save': {
-      const slot = ds.slot;
-      const items = trayItems();
+      const list = items();
+      const sides = [B.garnitureId, ...B.periphIds].filter(Boolean);
       S.addEntry(S.today(), {
-        slot,
-        itemIds: items.map(i => i.id),
+        slot: B.slot,
+        itemIds: list.map(i => i.id),
         customMacros: B.custom ? B.custom.macros : undefined,
         customName: B.custom ? B.custom.name : undefined,
         scale: B.scale,
-        macros: M.round(trayMacros()),
+        macros: M.round(macros()),
         recentBuckets: {
           plat: B.platId ? [B.platId] : [],
-          garniture: B.garnitureIds,
+          garniture: B.garnitureId ? [B.garnitureId] : [],
           periph: B.periphIds
         }
       });
+      /* Remember what actually went with this main, so the next prediction is better. */
+      if (B.platId) S.rememberPairing(B.platId, sides);
       closeSheet();
       B = null;
       return go('#/today');

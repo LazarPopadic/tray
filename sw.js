@@ -2,7 +2,7 @@
    Cache-first for everything, because the whole point is that it works in airplane mode.
    Bump VERSION whenever you change any file, or the phone keeps serving the old one. */
 
-var VERSION = "tray-v2";
+var VERSION = "tray-v3";
 var SCOPE = self.registration.scope;
 
 var PRECACHE = [
@@ -15,11 +15,14 @@ var PRECACHE = [
   "assets/js/lib/store.js",
   "assets/js/lib/recommend.js",
   "assets/js/lib/streak.js",
+  "assets/js/lib/predict.js",
   "assets/js/data/foods.js",
   "assets/js/data/home.js",
+  "assets/js/data/pairings.js",
   "assets/js/ui/common.js",
   "assets/js/ui/today.js",
   "assets/js/ui/tray.js",
+  "assets/js/ui/quick.js",
   "assets/js/ui/recipes.js",
   "assets/js/ui/calendar.js",
   "assets/js/ui/streakview.js",

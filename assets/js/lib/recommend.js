@@ -59,14 +59,24 @@ export function vegetableWarning(pool) {
    The fat penalty is deliberately left uncapped: going over on fat should keep hurting. */
 export const FILL_CAP = 1.5;
 
-export function scorePair(a, b, need) {
-  const s = M.add(a.macros, b.macros);
+export function scoreMacros(s, need) {
   const fill = (got, want) => Math.min(got / Math.max(want, 1), FILL_CAP);
   const fatFill = s.fat / Math.max(need.fat, 1);
+  const kcalFill = s.kcal / Math.max(need.kcal, 1);
   return WEIGHTS.protein * fill(s.protein, need.protein)
        + WEIGHTS.carbs   * fill(s.carbs,   need.carbs)
        + WEIGHTS.kcal    * fill(s.kcal,    need.kcal)
-       - WEIGHTS.fatPenalty * Math.max(0, fatFill - WEIGHTS.fatHeadroom);
+       - WEIGHTS.fatPenalty * Math.max(0, fatFill - WEIGHTS.fatHeadroom)
+       - (WEIGHTS.kcalShort || 0) * Math.max(0, 1 - kcalFill);
+}
+
+export function scorePair(a, b, need) {
+  return scoreMacros(M.add(a.macros, b.macros), need);
+}
+
+/* One item against what is left — used when swapping a single slot. */
+export function scoreSingle(item, need) {
+  return scoreMacros(item.macros, need);
 }
 
 /* §7.4: once the plat has spent the fat budget, fatty périphériques are off the table
@@ -84,10 +94,13 @@ export function filterPool(pool, platFat) {
 /* Every unordered pair, scored. Returns the best `count`, each with a reason. */
 export function recommendPairs(pool, need, ctx = {}, count = 3) {
   const items = filterPool(pool, ctx.platFat || 0);
+  const boost = ctx.boost || (() => 0);
   const out = [];
   for (let i = 0; i < items.length; i++) {
     for (let j = i + 1; j < items.length; j++) {
-      out.push({ a: items[i], b: items[j], score: scorePair(items[i], items[j], need) });
+      out.push({ a: items[i], b: items[j],
+                 score: scorePair(items[i], items[j], need)
+                        + boost(items[i].id) + boost(items[j].id) });
     }
   }
   out.sort((x, y) => y.score - x.score);
@@ -119,10 +132,14 @@ export function pairReason(a, b, need, ctx = {}) {
   const pWin = biggest(a, b, 'protein'), cWin = biggest(a, b, 'carbs');
   const r = Math.round;
 
-  let line = `${r(s.kcal)} kcal and ${r(s.protein)} g protein against a ${
-    r(need.kcal)} kcal gap`;
-  if (s.protein >= 5) line += `, most of the protein from the ${pWin.en.toLowerCase()}`;
-  else if (s.carbs >= 25) line += `, the carbs mostly from the ${cWin.en.toLowerCase()}`;
+  /* A need of 2 g is the clamp, not a real target: the main has already covered the
+     protein, and saying so is more use than naming the biggest of two small numbers. */
+  const proteinDone = need.protein <= 3;
+  let line = proteinDone
+    ? `The main already covers the protein, so these fill the remaining ${r(need.kcal)} kcal`
+    : `${r(s.kcal)} kcal and ${r(s.protein)} g protein against a ${r(need.kcal)} kcal gap`;
+  if (!proteinDone && s.protein >= 5) line += `, most of it from the ${pWin.en.toLowerCase()}`;
+  else if (s.carbs >= 25) line += `, mostly carbs from the ${cWin.en.toLowerCase()}`;
 
   if (ctx.platFat >= FAT_SPENT && s.fat < RICH_PERIPH) {
     line += `, and almost no extra fat — the ${(ctx.platName || 'main').toLowerCase()
@@ -156,7 +173,9 @@ export function platWarning(plat) {
     return `${Math.round(m.kcal)} kcal for ${Math.round(m.protein)} g protein. ` +
            'If there is a second meat today, take that instead.';
   }
-  if (density < 0.055) {
+  /* Only worth saying when the protein is genuinely small. A 500 kcal tagine with
+     26 g of protein is a fine trade and should not be scolded. */
+  if (density < 0.055 && m.protein < 20) {
     return `Mostly crumb and fat: ${Math.round(m.kcal)} kcal for only ${Math.round(m.protein)} g protein.`;
   }
   return null;

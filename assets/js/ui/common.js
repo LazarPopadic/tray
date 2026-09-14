@@ -1,5 +1,5 @@
-/* Shared rendering helpers. Views return HTML strings; clicks are handled by
-   delegation on [data-act], so nothing has to keep references to DOM nodes. */
+/* Shared rendering. Views return HTML strings; clicks are handled by delegation on
+   [data-act], so nothing holds references to DOM nodes. */
 
 import * as M from '../lib/macros.js';
 import { rankOf } from '../config.js';
@@ -9,7 +9,6 @@ export const esc = s => String(s == null ? '' : s)
   .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
 export const n0 = v => Math.round(v || 0).toLocaleString('en-GB');
-export const sign = v => (v > 0 ? '+' : '') + n0(v);
 
 export function macroLine(m) {
   const r = M.round(m);
@@ -20,8 +19,6 @@ export function estTag(item) {
   return item && item.estimated ? '<span class="est">est.</span>' : '';
 }
 
-/* One name for a logged entry. A free-text name wins outright; otherwise the item
-   names, collapsed so three eggs read as "Egg x3" rather than three times over. */
 export function entryLabel(e, lookup) {
   if (e.customName) return e.customName;
   const counts = new Map();
@@ -33,140 +30,213 @@ export function entryLabel(e, lookup) {
   return names.join(', ') || 'Logged';
 }
 
-/* ---------- meters ---------------------------------------------------------- */
+/* ---------- family glyphs -------------------------------------------------------
+   Six marks, one per meat family. They exist for one reason: you are holding a tray
+   and need to find "the fish one" without reading. Nothing else in the app gets an
+   icon — a glyph beside a settings row would just be decoration. */
 
-export function meter(name, got, target, size) {
+const GLYPHS = {
+  poultry: '<circle cx="9.2" cy="9.2" r="5.4"/><path d="M12.9 13l4.3 4.3"/><circle cx="18.9" cy="19" r="2.3"/>',
+  pork:    '<path d="M3.5 8.6h11.2a3.4 3.4 0 0 1 0 6.8H3.5z"/><circle cx="18.6" cy="12" r="2.2"/>',
+  beef:    '<rect x="3" y="8.5" width="18" height="7" rx="3.5"/><path d="M7.5 12h9"/>',
+  fish:    '<path d="M5.5 12c3-3.6 6.6-5.2 9.8-5.2 3 0 5.2 2 6.2 5.2-1 3.2-3.2 5.2-6.2 5.2-3.2 0-6.8-1.6-9.8-5.2z"/><path d="M5.5 12 2 8.8v6.4z"/><circle cx="16.4" cy="10.6" r=".9"/>',
+  pasta_pizza: '<path d="M12 3.2 20.6 19a21 21 0 0 1-17.2 0z"/><circle cx="10" cy="12.4" r="1.1"/><circle cx="14.2" cy="14.6" r="1.1"/>',
+  veg:     '<path d="M12 21v-7.4"/><path d="M12 13.6c0-3.2 2.6-5.8 5.8-5.8 0 3.2-2.6 5.8-5.8 5.8z"/><path d="M12 15.2c0-2.7-2.2-4.9-4.9-4.9 0 2.7 2.2 4.9 4.9 4.9z"/>'
+};
+
+export function glyph(family) {
+  const g = GLYPHS[family];
+  if (!g) return '';
+  return `<span class="glyph" aria-hidden="true"><svg viewBox="0 0 24 24">${g}</svg></span>`;
+}
+
+/* ---------- bars ------------------------------------------------------------------ */
+
+function fillClass(pct) {
+  if (pct >= 100 && pct <= 110) return 'hit';
+  if (pct > 110 && pct <= 125) return 'over';
+  if (pct > 125) return 'way-over';
+  return '';
+}
+
+/* `tick` marks the fraction where the day starts counting toward the streak. */
+export function bar(got, target, tick) {
   const pct = target > 0 ? (got / target) * 100 : 0;
   const w = Math.min(100, Math.max(0, pct));
-  const left = target - got;
-  let cls = '';
-  if (pct >= 100 && pct <= 110) cls = 'good';
-  else if (pct > 110 && pct <= 125) cls = 'over';
-  else if (pct > 125) cls = 'way-over';
-  const unit = name === 'kcal' ? '' : ' g';
-  return `<div class="meter ${size}">
-    <div class="top">
-      <span class="name">${esc(name)}</span>
-      <span class="grow"></span>
-      <span class="val num">${n0(got)}<span class="muted" style="font-weight:400"> / ${n0(target)}${unit}</span></span>
+  return `<div class="bar">
+    <div class="fill ${fillClass(pct)}" style="width:${w.toFixed(1)}%"></div>
+    ${tick ? `<div class="tick" style="left:${(tick * 100).toFixed(1)}%"></div>` : ''}
+  </div>`;
+}
+
+/* Level 1 of the Today screen: the day, as one number and three supporting ones. */
+export function hero(totals, targets, streak) {
+  const left = targets.kcal - totals.kcal;
+  const cell = (name, got, tgt, tick) => `
+    <div class="cell">
+      <span class="k label">${esc(name)}</span>
+      <span class="v">${n0(got)}<small> / ${n0(tgt)} g</small></span>
+      ${bar(got, tgt, tick)}
+    </div>`;
+  return `<div class="hero">
+    <div class="kcal">
+      <b>${n0(totals.kcal)}</b>
+      <span class="of">/ ${n0(targets.kcal)}</span>
+      <span class="unit">kcal</span>
     </div>
-    <div class="track"><div class="fill ${cls}" style="width:${w.toFixed(1)}%"></div></div>
-    <div class="left num">${
-      Math.abs(left) < 0.5 ? 'on target'
-      : left > 0 ? `${n0(left)}${unit} left`
-      : `${n0(-left)}${unit} over`}</div>
+    ${bar(totals.kcal, targets.kcal, streak ? streak.kcalFactor : null)}
+    <div class="tiny muted num" style="margin-top:var(--s2)">
+      ${left > 0 ? `${n0(left)} kcal left today` : `${n0(-left)} kcal over`}
+    </div>
+    <div class="rest">
+      ${cell('protein', totals.protein, targets.protein, streak ? streak.proteinFactor : null)}
+      ${cell('fat', totals.fat, targets.fat, null)}
+      ${cell('carbs', totals.carbs, targets.carbs, null)}
+    </div>
   </div>`;
 }
 
-export function meters(totals, targets) {
-  return `<div class="meters">
-    ${meter('kcal', totals.kcal, targets.kcal, 'major')}
-    ${meter('protein', totals.protein, targets.protein, 'major')}
-    ${meter('fat', totals.fat, targets.fat, 'minor')}
-    ${meter('carbs', totals.carbs, targets.carbs, 'minor')}
-  </div>`;
-}
+/* ---------- food tiles -------------------------------------------------------------- */
 
-/* ---------- dish cards ------------------------------------------------------ */
-
-export function dishCard(item, opts = {}) {
+export function tile(item, opts = {}) {
   const m = M.round(item.macros);
   const rank = rankOf(item.macros);
-  const pressed = opts.selected ? ' aria-pressed="true"' : '';
-  const extra = opts.className ? ' ' + opts.className : '';
   const act = opts.act || 'pick';
-  const flag = opts.flag ? `<span class="flag">${esc(opts.flag)}</span><br>` : '';
-  const look = opts.showLook !== false && item.look
-    ? `<div class="look">${esc(item.look)}</div>` : '';
-  const reason = opts.reason ? `<div class="look">${esc(opts.reason)}</div>` : '';
-  return `<button class="dish${extra}" data-act="${act}" data-id="${esc(item.id)}"${pressed}>
-    ${flag}
-    <div class="en"><span class="dot ${rank}"></span>${esc(item.en)}${estTag(item)}</div>
-    <div class="fr">${esc(item.fr)}${item.grams ? ` · ${n0(item.grams)} ${item.unit || 'g'}` : ''}</div>
-    <div class="figs"><div class="k">${n0(m.kcal)}</div><div class="p">${n0(m.protein)} g P</div></div>
-    ${look}${reason}
+  const extra = [opts.wide ? 'wide' : '', opts.className || ''].filter(Boolean).join(' ');
+  const data = Object.entries(opts.data || {})
+    .map(([k, v]) => ` data-${k}="${esc(v)}"`).join('');
+  /* aria-pressed only where the tile really is a toggle. On the main-dish grid a tile
+     is navigation, and announcing "not pressed" there is just wrong. */
+  const pressed = opts.selectable || opts.selected
+    ? ` aria-pressed="${opts.selected ? 'true' : 'false'}"` : '';
+  return `<button class="tile ${extra}" data-act="${act}" data-id="${esc(item.id)}"${data}${pressed}>
+    <span class="dot ${rank}" aria-hidden="true" title="${
+      rank === 'take' ? 'good protein for the calories'
+      : rank === 'ok' ? 'middling protein for the calories'
+      : 'poor protein for the calories'}"></span>
+    ${opts.wide ? '' : glyph(item.family)}
+    <span class="en">${esc(item.en)}${estTag(item)}</span>
+    <span class="fr">${esc(item.fr || item.unit || '')}</span>
+    <span class="figs"><b>${n0(m.kcal)}</b> kcal · ${n0(m.protein)} P</span>
   </button>`;
 }
 
-export function pairCard(pair, index) {
-  const m = M.round(pair.macros);
-  return `<button class="dish pick" data-act="pair" data-i="${index}">
-    <span class="flag">${index === 0 ? 'Best pick' : 'Also good'}</span>
-    <div class="en">${esc(pair.a.en)}${estTag(pair.a)} + ${esc(pair.b.en)}${estTag(pair.b)}</div>
-    <div class="figs"><div class="k">${n0(m.kcal)}</div><div class="p">${n0(m.protein)} g P</div></div>
-    <div class="look">${esc(pair.reason)}</div>
-  </button>`;
+export function tiles(list, opts = {}) {
+  if (!list.length) return `<div class="note">${esc(opts.empty || 'Nothing here.')}</div>`;
+  return `<div class="tiles${opts.one ? ' one' : ''}">${list.map(i => tile(i, opts)).join('')}</div>`;
 }
 
-/* ---------- chips ------------------------------------------------------------ */
+/* ---------- tray rows ---------------------------------------------------------------- */
+
+export function trayRow(slotName, item, opts = {}) {
+  const swap = opts.swap
+    ? `<button class="btn sm ghost" data-act="swap" data-slot="${esc(opts.swap)}"
+         ${opts.index != null ? `data-i="${opts.index}"` : ''}>${item ? 'Swap' : 'Choose'}</button>`
+    : '';
+  if (!item) {
+    return `<div class="trayrow none">
+      <span class="slotname label">${esc(slotName)}</span>
+      <span class="what"><span class="n">${esc(opts.emptyText || 'None')}</span></span>
+      ${swap}
+    </div>`;
+  }
+  const m = M.round(item.macros);
+  return `<div class="trayrow">
+    <span class="slotname label">${esc(slotName)}</span>
+    <span class="what">
+      <span class="n">${esc(item.en)}${estTag(item)}</span>
+      <span class="m">${n0(m.kcal)} kcal · ${n0(m.protein)} P · ${n0(m.fat)} F · ${n0(m.carbs)} C</span>
+      ${opts.why ? `<span class="why">${esc(opts.why)}</span>` : ''}
+    </span>
+    ${swap}
+  </div>`;
+}
+
+/* ---------- misc ------------------------------------------------------------------------ */
+
+export function steps(n, total) {
+  return `<span class="steps" role="img" aria-label="Step ${n} of ${total}">${
+    Array.from({ length: total }, (_, i) => `<i class="${i < n ? 'on' : ''}"></i>`).join('')
+  }</span>`;
+}
 
 export function chipRow(items, activeId, act) {
-  return `<div class="chiprow">${items.map(([id, label]) =>
-    `<button class="chip${id === activeId ? ' on' : ''}" data-act="${act}" data-v="${esc(id)}">${esc(label)}</button>`
+  return `<div class="chiprow" role="tablist">${items.map(([id, label]) =>
+    `<button class="chip${id === activeId ? ' on' : ''}" role="tab"
+       aria-selected="${id === activeId}" data-act="${act}" data-v="${esc(id)}">${esc(label)}</button>`
   ).join('')}</div>`;
 }
 
-/* ---------- sheet ------------------------------------------------------------ */
-
-let sheetEl = null;
-
-export function openSheet(html) {
-  closeSheet();
-  sheetEl = document.createElement('div');
-  sheetEl.className = 'scrim';
-  sheetEl.innerHTML = `<div class="sheet" role="dialog" aria-modal="true">
-    <div class="handle"></div>${html}</div>`;
-  sheetEl.addEventListener('click', e => { if (e.target === sheetEl) closeSheet(); });
-  document.body.appendChild(sheetEl);
-  return sheetEl;
-}
-
-export function closeSheet() {
-  if (sheetEl) { sheetEl.remove(); sheetEl = null; }
-}
-
-export function sheetOpen() { return !!sheetEl; }
-
-/* ---------- steppers ---------------------------------------------------------- */
-
-/* No est. tag here: every ingredient on this screen is a label value, and the screen
-   says so once at the bottom. A marker on all six rows is noise, not honesty. */
 export function stepper(item, qty, act) {
   const m = M.round(M.scale(item.macros, qty));
   return `<div class="ing">
     <div class="lab">
       <div class="n">${esc(item.en)}</div>
-      <div class="u num">${esc(item.unit)} · ${n0(m.kcal)} kcal · ${n0(m.protein)} g P</div>
+      <div class="u">${esc(item.unit)} · ${n0(m.kcal)} kcal · ${n0(m.protein)} g P</div>
     </div>
     <div class="step">
-      <button data-act="${act}" data-id="${esc(item.id)}" data-d="-1" aria-label="Less">&minus;</button>
-      <span class="q">${qty}</span>
-      <button data-act="${act}" data-id="${esc(item.id)}" data-d="1" aria-label="More">+</button>
+      <button data-act="${act}" data-id="${esc(item.id)}" data-d="-1"
+        aria-label="Less ${esc(item.en)}">&minus;</button>
+      <span class="q" aria-live="polite">${qty}</span>
+      <button data-act="${act}" data-id="${esc(item.id)}" data-d="1"
+        aria-label="More ${esc(item.en)}">+</button>
     </div>
   </div>`;
 }
-
-/* ---------- misc --------------------------------------------------------------- */
 
 export function switchRow(label, on, act, hint) {
   return `<div class="field">
-    <label>${esc(label)}${hint ? `<div class="tiny muted">${esc(hint)}</div>` : ''}</label>
-    <button class="switch" role="switch" aria-checked="${on ? 'true' : 'false'}" data-act="${act}"></button>
+    <label id="lb_${act}">${esc(label)}${hint ? `<div class="tiny muted">${esc(hint)}</div>` : ''}</label>
+    <button class="switch" role="switch" aria-labelledby="lb_${act}"
+      aria-checked="${on ? 'true' : 'false'}" data-act="${act}"></button>
   </div>`;
 }
 
-export function numberRow(label, value, act, step) {
-  return `<div class="field">
-    <label for="f_${act}">${esc(label)}</label>
-    <input id="f_${act}" type="number" inputmode="decimal" step="${step || 1}"
-           value="${esc(value)}" data-act="${act}">
+/* before -> after, shown wherever an action changes the day's numbers */
+export function delta(before, after, target, unit) {
+  return `<div class="delta">
+    <span>${n0(before)}</span>
+    <span class="arrow" aria-hidden="true">&rarr;</span>
+    <b>${n0(after)}</b>
+    <span>of ${n0(target)}${unit || ''}</span>
   </div>`;
 }
 
-/* A one-line sparkline of daily kcal against the target. */
+/* ---------- sheet ------------------------------------------------------------------------ */
+
+let sheetEl = null;
+let lastFocus = null;
+
+export function openSheet(html, opts = {}) {
+  closeSheet();
+  lastFocus = document.activeElement;
+  sheetEl = document.createElement('div');
+  sheetEl.className = 'scrim';
+  sheetEl.innerHTML = `<div class="sheet" role="dialog" aria-modal="true"
+    ${opts.label ? `aria-label="${esc(opts.label)}"` : ''}>
+    <div class="handle"></div>${html}</div>`;
+  sheetEl.addEventListener('click', e => { if (e.target === sheetEl) closeSheet(); });
+  document.body.appendChild(sheetEl);
+  const first = sheetEl.querySelector('button, input, [tabindex]');
+  if (first && opts.focus !== false) first.focus({ preventScroll: true });
+  return sheetEl;
+}
+
+export function closeSheet() {
+  if (!sheetEl) return;
+  sheetEl.remove();
+  sheetEl = null;
+  if (lastFocus && document.contains(lastFocus)) lastFocus.focus({ preventScroll: true });
+  lastFocus = null;
+}
+
+export function sheetOpen() { return !!sheetEl; }
+
+/* ---------- sparkline --------------------------------------------------------------------- */
+
 export function sparkline(series, target) {
   if (!series.length) return '';
-  const w = 320, h = 96, pad = 4;
+  const w = 320, h = 92, pad = 4;
   const max = Math.max(target * 1.25, ...series.map(s => s.kcal), 1);
   const x = i => pad + (i * (w - pad * 2)) / Math.max(series.length - 1, 1);
   const y = v => h - pad - (v / max) * (h - pad * 2);
@@ -183,7 +253,7 @@ export function sparkline(series, target) {
   return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img"
       aria-label="Daily calories over the last ${series.length} days against the ${n0(target)} target">
     <line x1="${pad}" y1="${ty}" x2="${w - pad}" y2="${ty}"
-          stroke="var(--muted)" stroke-width="1" stroke-dasharray="3 3"/>
+          stroke="var(--rule-firm)" stroke-width="1" stroke-dasharray="3 3"/>
     ${runs.map(r => `<polyline points="${r.join(' ')}" fill="none" stroke="var(--accent)"
        stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`).join('')}
     ${series.map((s, i) => s.kcal > 0

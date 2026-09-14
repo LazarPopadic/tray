@@ -18,10 +18,25 @@ export const SLOT_LABEL = {
   breakfast: 'Breakfast', lunch: 'Lunch tray', dinner: 'Dinner tray',
   shake: 'Night shake', extra: 'Something else'
 };
+/* Short forms, for buttons where 'Add to lunch tray' reads worse than 'Add to lunch'. */
+export const SLOT_SHORT = {
+  breakfast: 'breakfast', lunch: 'lunch', dinner: 'dinner',
+  shake: 'the shake', extra: 'extras'
+};
+
 export const SLOT_TIME = { breakfast: 8, lunch: 12, dinner: 19, shake: 22.5 };
 
 /* Périphérique pair scoring. */
-export const WEIGHTS = { protein: 2.0, carbs: 1.0, kcal: 0.8, fatPenalty: 2.5, fatHeadroom: 0.45 };
+/* Périphérique pair scoring. kcalShort is not in the handover: without it the scorer
+   happily returns a 150 kcal pair that leaves the meal 200 short, because protein is
+   weighted 2.0 and two lentil salads max it out cheaply. Undershooting calories is the
+   characteristic way a lean bulk fails, so it costs something — symmetric to the fat
+   penalty, which punishes overshooting the other direction. */
+export const WEIGHTS = {
+  protein: 2.0, carbs: 1.0, kcal: 0.8,
+  fatPenalty: 2.5, fatHeadroom: 0.45,
+  kcalShort: 1.6
+};
 
 /* A day counts toward the streak if it reaches this fraction of kcal AND protein. */
 export const STREAK = { kcalFactor: 0.90, proteinFactor: 0.90 };
@@ -79,9 +94,14 @@ export const MAINTENANCE = {
 export const ABOUT =
   'Macros come from the CROUS Montpellier-Occitanie published nutrition database, per portion as ' +
   'served. Grenoble and Toulouse publish databases too, but per 100 g with no portion weights, so ' +
-  'they cannot be used here; Versailles, which covers your campus, publishes nothing. Portions are ' +
+  'they cannot be used here; Versailles, which covers your campus, publishes no nutrition data at all. Portions are ' +
   'standardised network-wide by GEM-RCN grammages, so Montpellier’s figures transfer. ' +
   'Real serving variance is around ±15% depending on who is holding the ladle. ' +
   'Items marked est. are either standard reference values rather than CROUS figures, or CROUS rows ' +
   'whose stated energy does not match their own macros. ' +
+  'Which garniture the app expects beside a given main comes from two places: how often each ' +
+  'one actually appeared on a CROUS menu, counted across 114 restaurants in 13 academies from ' +
+  'the CROUStillant open-data API, and a table of standard pairings that is an editorial ' +
+  'judgement rather than measured. Once you have logged the same main a few times, what you ' +
+  'actually took beats both. ' +
   'None of this is medical advice and it is not as precise as it looks.';

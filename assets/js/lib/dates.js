@@ -1,7 +1,7 @@
 /* Local dates only. Never UTC — a 22:30 shake in Paris must land on today,
    and a 00:40 one must land on yesterday. */
 
-import { DAY_ROLLOVER_HOUR } from '../config.js';
+import { DAY_ROLLOVER_HOUR, SLOT_TIME } from '../config.js';
 
 /* The date a moment belongs to, honouring the rollover hour. */
 export function dayKey(d = new Date(), rollover = DAY_ROLLOVER_HOUR) {
@@ -77,11 +77,15 @@ export function dayLabel(key) {
   return `${wd} ${d.getDate()} ${MONTHS[d.getMonth()].slice(0, 3)}`;
 }
 
-/* Which slot the user most likely wants right now: the closest unlogged one by clock time. */
+/* Which slot the user most likely wants right now: the closest unlogged one by clock
+   time, measured around the clock. At 00:30 the night shake is two hours away and
+   breakfast is seven and a half — without the wrap, breakfast wins, which is wrong. */
 export function nearestSlot(unlogged, now = new Date()) {
   if (!unlogged.length) return null;
   const h = now.getHours() + now.getMinutes() / 60;
-  const time = { breakfast: 8, lunch: 12, dinner: 19, shake: 22.5 };
-  return unlogged.slice().sort((a, b) =>
-    Math.abs(time[a] - h) - Math.abs(time[b] - h))[0];
+  const away = slot => {
+    const d = Math.abs(SLOT_TIME[slot] - h);
+    return Math.min(d, 24 - d);
+  };
+  return unlogged.slice().sort((a, b) => away(a) - away(b))[0];
 }
