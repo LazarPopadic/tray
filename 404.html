@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>Tray</title>
+<script>
+  /* GitHub Pages serves this for any unknown path. Tray uses hash routes,
+     so send everything back to the app root and let the router take over. */
+  var base = location.pathname.replace(/\/[^\/]*$/, "/");
+  location.replace(base.replace(/\/$/, "") + "/#/today");
+</script>
+</head>
+<body style="font:16px -apple-system,system-ui,sans-serif;padding:24px">
+<p><a href="./">Back to Tray</a></p>
+</body>
+</html>
