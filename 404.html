@@ -6,13 +6,18 @@
 <meta name="robots" content="noindex, nofollow">
 <title>Tray</title>
 <script>
-  /* GitHub Pages serves this for any unknown path. Tray uses hash routes,
-     so send everything back to the app root and let the router take over. */
-  var base = location.pathname.replace(/\/[^\/]*$/, "/");
-  location.replace(base.replace(/\/$/, "") + "/#/today");
+  /* GitHub Pages serves this file for any path it does not recognise. Tray lives
+     entirely under hash routes, so send anything stray back to the app root.
+     On a project page the first path segment is the repo name; at a domain root
+     there is no segment and "/" is correct. */
+  (function () {
+    var seg = location.pathname.split("/").filter(Boolean);
+    var base = seg.length > 1 ? "/" + seg[0] + "/" : seg.length === 1 ? "/" : "/";
+    if (location.pathname !== base) location.replace(base + "#/today");
+  })();
 </script>
 </head>
 <body style="font:16px -apple-system,system-ui,sans-serif;padding:24px">
-<p><a href="./">Back to Tray</a></p>
+<p>That page does not exist. <a href="./">Back to Tray</a>.</p>
 </body>
 </html>
