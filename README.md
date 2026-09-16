@@ -30,8 +30,12 @@ replaces just that line and leaves the rest alone — correcting a prediction is
 than making one.
 
 Everything else goes through **Anything else**, which leads with meals you have logged before
-(one tap to repeat) and then a small tiled catalogue. Breakfast and the night shake are fixed
-recipes, so they sit in the add sheet with a **Log** button: one tap each.
+(one tap to repeat) and then a small tiled catalogue.
+
+**Breakfast and the night shake are fixed recipes, so they add in two taps from the Today
+screen** — the first shows what you are about to add, the second adds it. No trip through an
+editor you did not ask for. A toast offers **Undo** for six seconds afterwards, and **Edit**
+on the armed row opens the recipe if you really do want to change it.
 
 ### How the prediction works
 

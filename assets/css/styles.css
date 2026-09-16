@@ -314,6 +314,29 @@ main.with-dock { padding-bottom: calc(var(--bar-h) + 78px + env(safe-area-inset-
 .slot .add { color: var(--muted); font-size: 18px; width: 24px; text-align: center; flex: none; }
 .slot.empty .title { color: var(--muted); font-weight: var(--w-reg); }
 
+/* Armed: the row is showing what it is about to add and waiting for a second tap. */
+.slot.armed { background: var(--take-wash); }
+.slot.armed .body { flex: 1; min-width: 0; text-align: left; }
+.slot.armed .title { font-weight: var(--w-mid); }
+.slot .btn { flex: none; }
+
+/* Toast, with an optional action such as Undo. */
+.toast {
+  position: fixed; left: 50%; transform: translateX(-50%); z-index: 50;
+  bottom: calc(var(--bar-h) + env(safe-area-inset-bottom) + 76px);
+  display: flex; align-items: center; gap: var(--s3);
+  max-width: calc(100vw - var(--s5));
+  padding: var(--s2) var(--s3) var(--s2) var(--s4);
+  background: var(--ink); color: var(--ground);
+  border-radius: var(--r-full); font-size: var(--t-small);
+  box-shadow: var(--shadow);
+}
+.toast-action {
+  flex: none; min-height: 32px; padding: 0 var(--s3);
+  border-radius: var(--r-full); background: var(--ground); color: var(--ink);
+  font-size: var(--t-small); font-weight: var(--w-bold);
+}
+
 /* ---------- food tiles ----------------------------------------------------------
    Level 3. What you actually tap, so they are the biggest targets on the screen and
    the selected state is unmistakable. */

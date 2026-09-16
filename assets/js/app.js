@@ -86,25 +86,34 @@ function render(opts = {}) {
     const again = document.querySelector(`[data-act="${opts.keepFocus}"]`);
     if (again) { again.focus(); try { again.setSelectionRange(caret, caret); } catch (e) {} }
   }
-  if (opts.toast) toast(opts.toast);
+  if (opts.toast) {
+    const t = opts.toast;
+    toast(typeof t === 'string' ? t : t.msg, typeof t === 'string' ? null : t.action);
+  }
 }
 
 let toastTimer = null;
-function toast(msg) {
-  let el = document.getElementById('toast');
-  if (!el) {
-    el = document.createElement('div');
-    el.id = 'toast';
-    el.setAttribute('role', 'status');
-    el.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);' +
-      'bottom:calc(var(--bar-h) + env(safe-area-inset-bottom) + 76px);z-index:50;' +
-      'background:var(--ink);color:var(--ground);padding:10px 16px;border-radius:var(--r-full);' +
-      'font-size:13.5px;box-shadow:var(--shadow)';
-    document.body.appendChild(el);
+
+/* A toast can carry one action — used for Undo, which needs longer on screen than a
+   plain confirmation because the whole point is catching a misclick. */
+function toast(msg, action) {
+  const old = document.getElementById('toast');
+  if (old) old.remove();
+  const el = document.createElement('div');
+  el.id = 'toast';
+  el.className = 'toast';
+  el.setAttribute('role', 'status');
+  el.appendChild(Object.assign(document.createElement('span'), { textContent: msg }));
+  if (action) {
+    const b = document.createElement('button');
+    b.className = 'toast-action';
+    b.textContent = action.label;
+    b.addEventListener('click', () => { el.remove(); action.fn(); });
+    el.appendChild(b);
   }
-  el.textContent = msg;
+  document.body.appendChild(el);
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.remove(), 1900);
+  toastTimer = setTimeout(() => el.remove(), action ? 6000 : 1900);
 }
 
 function go(hash) {

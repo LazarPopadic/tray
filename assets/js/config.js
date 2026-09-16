@@ -24,9 +24,12 @@ export const SLOT_SHORT = {
   shake: 'the shake', extra: 'extras'
 };
 
+/* What the two fixed recipes are called once logged. Without this a logged breakfast
+   reads as its whole ingredient list, which tells you nothing you wanted to know. */
+export const RECIPE_NAME = { breakfast: 'Morning blend', shake: 'Night shake' };
+
 export const SLOT_TIME = { breakfast: 8, lunch: 12, dinner: 19, shake: 22.5 };
 
-/* Périphérique pair scoring. */
 /* Périphérique pair scoring. kcalShort is not in the handover: without it the scorer
    happily returns a 150 kcal pair that leaves the meal 200 short, because protein is
    weighted 2.0 and two lentil salads max it out cheaply. Undershooting calories is the

@@ -7,7 +7,7 @@ import * as R from '../lib/recommend.js';
 import * as ST from '../lib/streak.js';
 import { food } from '../data/foods.js';
 import { ALL_HOME, homeItem } from '../data/home.js';
-import { SLOT_ORDER, SLOT_LABEL, BREAKFAST_DEFAULT, SHAKE_DEFAULT } from '../config.js';
+import { SLOT_ORDER, SLOT_LABEL, RECIPE_NAME, BREAKFAST_DEFAULT, SHAKE_DEFAULT } from '../config.js';
 import { dayLabel } from '../lib/dates.js';
 import { esc, n0, macroLine, hero, openSheet, closeSheet,
          entryLabel as makeLabel } from './common.js';
@@ -29,9 +29,34 @@ function savedRecipe(kind) {
 
 /* ---------- slot strip ---------------------------------------------------------- */
 
+/* The two fixed recipes are one thing you eat, not a form to fill in. Tapping shows
+   what you are about to add; tapping again adds it. No detour through the editor. */
+const FIXED = { breakfast: 'breakfast', shake: 'shake' };
+let armed = null;
+
+function fixedRow(slot) {
+  const m = recipeMacros(savedRecipe(FIXED[slot]));
+  if (armed !== slot) {
+    return `<button class="slot empty" data-act="open" data-slot="${slot}">
+      <span class="when">${CLOCK[slot]}</span>
+      <span class="body"><span class="title">${esc(SLOT_LABEL[slot])}</span></span>
+      <span class="add" aria-hidden="true">+</span>
+    </button>`;
+  }
+  return `<div class="slot armed">
+    <span class="when">${CLOCK[slot]}</span>
+    <button class="body" data-act="open" data-slot="${slot}">
+      <span class="title">${esc(SLOT_LABEL[slot])} — tap again to add</span>
+      <span class="detail num">${macroLine(m)}</span>
+    </button>
+    <button class="btn sm ghost" data-act="editrecipe" data-kind="${FIXED[slot]}">Edit</button>
+  </div>`;
+}
+
 function slotRow(key, slot) {
   const entries = S.entriesFor(key, slot);
   if (!entries.length) {
+    if (FIXED[slot]) return fixedRow(slot);
     return `<button class="slot empty" data-act="open" data-slot="${slot}">
       <span class="when">${CLOCK[slot]}</span>
       <span class="body"><span class="title">${esc(SLOT_LABEL[slot])}</span></span>
@@ -39,11 +64,15 @@ function slotRow(key, slot) {
     </button>`;
   }
   const m = M.sum(entries.map(e => e.macros));
+  /* The night shake's recipe is called the same as its slot, so showing both reads
+     as "Night shake Night shake". */
+  const detail = entries.map(entryLabel).join(' · ');
   return `<button class="slot" data-act="view" data-slot="${slot}">
     <span class="when">${CLOCK[slot]}</span>
     <span class="body">
       <span class="title">${esc(SLOT_LABEL[slot])}</span>
-      <span class="detail">${esc(entries.map(entryLabel).join(' · '))}</span>
+      ${detail && detail !== SLOT_LABEL[slot]
+        ? `<span class="detail">${esc(detail)}</span>` : ''}
     </span>
     <span class="figs"><span class="k">${n0(m.kcal)}</span><br><span class="p">${n0(m.protein)} P</span></span>
   </button>`;
@@ -129,13 +158,16 @@ function addSheet() {
   const sh = recipeMacros(savedRecipe('shake'));
   const logged = S.loggedSlots(S.today());
 
+  /* The macros are already on screen here, so one tap on Log is enough — the second
+     tap on the Today row exists only because that row has no room to show them. */
   const recipe = (kind, name, m, slot) => `
     <div class="trayrow">
-      <button class="what" data-act="editrecipe" data-kind="${kind}" style="text-align:left">
-        <span class="n">${esc(name)}${logged.includes(slot) ? ' · logged' : ''}</span>
+      <span class="what">
+        <span class="n">${esc(name)}${logged.includes(slot) ? ' · already logged' : ''}</span>
         <span class="m">${n0(m.kcal)} kcal · ${n0(m.protein)} P · ${n0(m.fat)} F · ${n0(m.carbs)} C</span>
-      </button>
-      <button class="btn sm" data-act="logrecipe" data-kind="${kind}">Log</button>
+      </span>
+      <button class="btn sm ghost" data-act="editrecipe" data-kind="${kind}">Edit</button>
+      <button class="btn sm" data-act="logrecipe" data-kind="${kind}">Add</button>
     </div>`;
 
   return openSheet(`
@@ -157,7 +189,7 @@ function addSheet() {
       ${recipe('breakfast', 'Morning blend', bf, 'breakfast')}
       ${recipe('shake', 'Night shake', sh, 'shake')}
     </div>
-    <p class="tiny muted" style="margin-top:var(--s3)">Tap the name to change the recipe first.</p>
+    <p class="tiny muted" style="margin-top:var(--s3)">Add puts it straight on today's total. Edit changes the recipe first.</p>
   `, { label: 'Add a meal' });
 }
 
@@ -186,28 +218,49 @@ function viewSlot(key, slot) {
 function logRecipe(kind) {
   const rows = savedRecipe(kind);
   const m = recipeMacros(rows);
-  if (M.isZero(m)) return;
-  S.addEntry(S.today(), {
+  if (M.isZero(m)) return null;
+  return S.addEntry(S.today(), {
     slot: kind,
     itemIds: rows.flatMap(r => Array(r.qty).fill(r.id)),
+    customName: RECIPE_NAME[kind],
     macros: M.round(m)
   });
 }
 
+/* Logged, with a way back out — a misclick should cost one tap, not a trip through
+   the slot sheet to find Delete. */
+function logWithUndo(kind, rerender) {
+  const key = S.today();
+  const e = logRecipe(kind);
+  if (!e) return;
+  armed = null;
+  rerender({ toast: {
+    msg: `${RECIPE_NAME[kind]} added · ${n0(e.macros.kcal)} kcal`,
+    action: { label: 'Undo', fn: () => { S.removeEntry(key, e.id); rerender(); } }
+  } });
+}
+
 export function onAct(act, ds, e, rerender, go) {
   const key = S.today();
+  /* Any action other than arming one of the fixed rows cancels a pending one. */
+  if (!(act === 'open' && FIXED[ds.slot])) armed = null;
+
   switch (act) {
     case 'addmeal': return addSheet();
     case 'go': closeSheet(); return go(ds.to);
     case 'editrecipe': closeSheet(); return go('#/' + ds.kind);
     case 'logrecipe': {
-      logRecipe(ds.kind);
       closeSheet();
-      return rerender({ toast: ds.kind === 'shake' ? 'Night shake logged.' : 'Breakfast logged.' });
+      return logWithUndo(ds.kind, rerender);
     }
     case 'open': {
       const slot = ds.slot;
-      if (slot === 'breakfast' || slot === 'shake') return go('#/' + slot);
+      if (FIXED[slot]) {
+        /* First tap arms and shows the macros; second tap commits. */
+        if (armed === slot) return logWithUndo(slot, rerender);
+        armed = slot;
+        return rerender();
+      }
       if (slot === 'lunch' || slot === 'dinner') return go('#/tray/' + slot);
       return addSheet();
     }

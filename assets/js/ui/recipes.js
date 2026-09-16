@@ -3,7 +3,7 @@
 import * as S from '../lib/store.js';
 import * as M from '../lib/macros.js';
 import { INGREDIENTS, homeItem } from '../data/home.js';
-import { BREAKFAST_DEFAULT, SHAKE_DEFAULT, SLOT_LABEL } from '../config.js';
+import { BREAKFAST_DEFAULT, SHAKE_DEFAULT, SLOT_LABEL, RECIPE_NAME } from '../config.js';
 import { esc, n0, macroLine, stepper, bar, delta } from './common.js';
 
 const SPEC = {
@@ -123,6 +123,7 @@ export function onAct(act, ds, e, rerender, go) {
       S.addEntry(S.today(), {
         slot: SPEC[which].slot,
         itemIds: draft.flatMap(r => Array(r.qty).fill(r.id)),
+        customName: RECIPE_NAME[SPEC[which].slot],
         macros: M.round(t)
       });
       return go('#/today');
