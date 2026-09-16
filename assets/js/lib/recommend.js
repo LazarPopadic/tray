@@ -207,9 +207,9 @@ export function gapAdvice(gap, homeItems) {
     const whey = homeItems.find(i => i.id === 'whey');
     const milk = homeItems.find(i => i.id === 'milk_whole');
     if (whey) {
-      const scoops = Math.max(1, Math.round(gap.protein / whey.macros.protein));
-      const g = scoops * 10;
-      const withMilk = gap.kcal - scoops * whey.macros.kcal > 150 && milk;
+      const units = Math.max(1, Math.round(gap.protein / whey.macros.protein));
+      const g = units * (whey.unitGrams || 10);
+      const withMilk = gap.kcal - units * whey.macros.kcal > 150 && milk;
       parts.push(withMilk ? `${g} g of whey in 300 ml of whole milk` : `${g} g of whey`);
     }
   }

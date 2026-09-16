@@ -2,7 +2,7 @@
    Cache-first for everything, because the whole point is that it works in airplane mode.
    Bump VERSION whenever you change any file, or the phone keeps serving the old one. */
 
-var VERSION = "tray-v3";
+var VERSION = "tray-v4";
 var SCOPE = self.registration.scope;
 
 var PRECACHE = [

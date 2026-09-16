@@ -171,7 +171,7 @@ export function stepper(item, qty, act) {
   const m = M.round(M.scale(item.macros, qty));
   return `<div class="ing">
     <div class="lab">
-      <div class="n">${esc(item.en)}</div>
+      <div class="n">${esc(item.en)}${item.hint ? ` <span class="muted">· ${esc(item.hint(qty))}</span>` : ''}</div>
       <div class="u">${esc(item.unit)} · ${n0(m.kcal)} kcal · ${n0(m.protein)} g P</div>
     </div>
     <div class="step">

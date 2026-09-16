@@ -61,18 +61,21 @@ export function rankOf(m) {
   return d >= RANK_CUTOFFS.take ? 'take' : d >= RANK_CUTOFFS.ok ? 'ok' : 'skip';
 }
 
-/* Default home recipes. Quantities are in each ingredient's own unit (see data/home.js). */
+/* Default home recipes. Quantities are in each ingredient's own unit (see data/home.js).
+   Whey is in 5 g units, so 6 = one 30 g MyProtein scoop and 9 = a scoop and a half.
+   These land breakfast on ~57 g protein and the shake on ~43 g, against a plan of
+   59 and 42 — the real powder is 73% protein, not the 80% the app first assumed. */
 export const BREAKFAST_DEFAULT = [
   { id: 'milk_semi', qty: 5 },   /* 500 ml */
   { id: 'oats',      qty: 12 },  /* 120 g  */
-  { id: 'whey',      qty: 3 },   /*  30 g  */
+  { id: 'whey',      qty: 6 },   /*  30 g — one level scoop */
   { id: 'banana',    qty: 1 },
   { id: 'honey',     qty: 3 },   /*  30 g  */
   { id: 'raisins',   qty: 4 }    /*  40 g  */
 ];
 
 export const SHAKE_DEFAULT = [
-  { id: 'whey',       qty: 4 },  /*  40 g  */
+  { id: 'whey',       qty: 9 },  /*  45 g — a scoop and a half */
   { id: 'milk_whole', qty: 3 }   /* 300 ml */
 ];
 

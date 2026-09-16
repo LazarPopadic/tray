@@ -2,21 +2,49 @@
    None of this comes from CROUS, so every item here carries the est. marker.
    Macros are per one `unit`; quantities are whole multiples of that unit. */
 
-const mk = (id, en, unit, kcal, protein, fat, carbs, group) =>
-  ({ id, en, unit, group, category: 'home', estimated: true,
+/* `unitGrams` only matters for the few ingredients the gap advice quotes in grams. */
+const mk = (id, en, unit, kcal, protein, fat, carbs, group, unitGrams = 10) =>
+  ({ id, en, unit, group, unitGrams, category: 'home', estimated: true,
      macros: { kcal, protein, fat, carbs } });
 
-/* The eight the breakfast blend and the night shake are built from. */
+/* The whey is counted in 5 g units, not 10, because a MyProtein scoop is 30 g:
+   6 units is one level scoop and 9 is a scoop and a half, which is what the night
+   shake actually takes. Whole 10 g units cannot express a half scoop. */
+export const WHEY_UNIT_G = 5;
+
+/* The eight the breakfast blend and the night shake are built from.
+
+   The whey figures are MyProtein Impact Whey Protein, Chocolat Onctueux, as sold:
+   376 kcal, 73 g protein, 6.2 g fat, 6.5 g carbs per 100 g. Note that is 73%, not the
+   "82 g per 100 g" on the marketing — that figure is unflavoured and on a dry basis.
+   Settings → Whey overrides all of this from the tub in your hand. */
 export const INGREDIENTS = [
   mk('oats',          'Oats',                'per 10 g',   38, 1.33, 0.65, 6.75, 'blend'),
   mk('milk_semi',     'Semi-skimmed milk',   'per 100 ml', 47, 3.4,  1.6,  4.8,  'blend'),
   mk('milk_whole',    'Whole milk',          'per 100 ml', 64, 3.3,  3.6,  4.8,  'blend'),
-  mk('whey',          'Whey protein',        'per 10 g',   40, 8.0,  0.37, 1.0,  'blend'),
+  mk('whey',          'Whey protein',        'per 5 g',  18.8, 3.65, 0.31, 0.33, 'blend', WHEY_UNIT_G),
   mk('banana',        'Banana',              '1 medium',  105, 1.3,  0.3,  27.0, 'blend'),
   mk('honey',         'Honey',               'per 10 g',   30, 0.0,  0.0,  8.2,  'blend'),
   mk('raisins',       'Raisins',             'per 10 g',   30, 0.3,  0.05, 8.0,  'blend'),
   mk('peanut_butter', 'Peanut butter',       'per 10 g',   63, 2.5,  5.2,  2.0,  'blend')
 ];
+
+/* What the app ships with, per 100 g — the shape a tub is actually labelled in. */
+export const WHEY_DEFAULT_PER_100G = { kcal: 376, protein: 73, fat: 6.2, carbs: 6.5 };
+
+/* Standing at the counter with a scoop in your hand, "9" means nothing and
+   "45 g, a scoop and a half" means everything. */
+export const SCOOP_G = 30;
+INGREDIENTS.find(i => i.id === 'whey').hint = qty => {
+  const g = qty * WHEY_UNIT_G;
+  const scoops = g / SCOOP_G;
+  const name = scoops === 1 ? 'scoop' : 'scoops';
+  const pretty = Number.isInteger(scoops) ? String(scoops)
+    : scoops === 0.5 ? 'half a'
+    : Number.isInteger(scoops * 2) ? `${Math.floor(scoops)}½`
+    : scoops.toFixed(1);
+  return `${g} g${g ? `, ${pretty} ${scoops === 0.5 ? 'scoop' : name}` : ''}`;
+};
 
 /* One-tap food for the days the restaurant is shut. */
 export const HOME_FOODS = [
@@ -61,9 +89,18 @@ export const HOME_GROUPS = [
 
 export const ALL_HOME = INGREDIENTS.concat(HOME_FOODS);
 
+/* The whey override is stored per 100 g, because that is how every tub is labelled.
+   Asking someone to divide their label by 20 before typing it in is how you get a
+   silently wrong protein target. */
 export function homeItem(id, wheyOverride) {
   const it = ALL_HOME.find(i => i.id === id);
   if (!it) return null;
-  if (it.id === 'whey' && wheyOverride) return { ...it, macros: wheyOverride, estimated: false };
+  if (it.id === 'whey' && wheyOverride) {
+    const f = WHEY_UNIT_G / 100;
+    return { ...it, estimated: false, macros: {
+      kcal: wheyOverride.kcal * f, protein: wheyOverride.protein * f,
+      fat: wheyOverride.fat * f, carbs: wheyOverride.carbs * f
+    } };
+  }
   return it;
 }

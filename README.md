@@ -81,6 +81,23 @@ assets/js/tests.js           the self-check
 Most things you would want to change are in `config.js`: the targets, what each slot is meant
 to deliver, how the scorer is weighted, and the streak thresholds.
 
+### The whey
+
+Set up for **MyProtein Impact Whey Protein, Chocolat Onctueux** — 376 kcal, 73 g protein,
+6.2 g fat, 6.5 g carbs per 100 g. That is 73%, not the "82 g per 100 g" on the marketing;
+that figure is unflavoured and on a dry basis.
+
+Whey is counted in **5 g units** because a MyProtein scoop is 30 g, so 6 units is one level
+scoop and 9 is a scoop and a half — whole 10 g units cannot express a half scoop. The
+steppers show the grams and the scoop count next to the number.
+
+Defaults: **breakfast one scoop (30 g), night shake a scoop and a half (45 g)**. That gives
+1,119 kcal / 57 g protein and 361 kcal / 43 g protein, against slot plans of 1,127/59 and
+352/42.
+
+To change tub, use **Settings → Whey** and copy the four numbers straight off the label.
+They are **per 100 g**, the way tubs are actually labelled — no dividing by hand.
+
 To run it locally: `python tools/serve.py` then open http://localhost:5190.
 
 ### The one thing to remember when you push
@@ -88,7 +105,7 @@ To run it locally: `python tools/serve.py` then open http://localhost:5190.
 **Bump `VERSION` in `sw.js`** every time you change any file:
 
 ```js
-var VERSION = "tray-v4";   // was tray-v3
+var VERSION = "tray-v5";   // was tray-v4
 ```
 
 The service worker serves from cache first so the app opens instantly and works offline. If you

@@ -259,17 +259,43 @@ t('the gap advice turns a shortfall into food', () => {
 
 g('The day lands on target (§11)');
 
-t('breakfast reconstructs to the handover figure', () => {
+t('breakfast lands on its slot plan with one scoop of whey', () => {
   const m = recipeMacros(BREAKFAST_DEFAULT);
-  near(m.kcal, 1127, 3, 'kcal'); near(m.protein, 59, 1, 'protein');
-  near(m.fat, 17, 1, 'fat'); near(m.carbs, 192, 1, 'carbs');
-  return `${Math.round(m.kcal)} kcal · ${Math.round(m.protein)} P`;
+  /* Real powder is 73% protein, so this comes in a shade under the 1127/59 plan
+     rather than exactly on it. Within a couple of grams is the point. */
+  near(m.kcal, 1119, 5, 'kcal'); near(m.protein, 57.4, 1.5, 'protein');
+  near(m.carbs, 191, 2, 'carbs');
+  const whey = BREAKFAST_DEFAULT.find(r => r.id === 'whey');
+  assert(whey.qty === 6, 'breakfast should be one 30 g scoop');
+  return `${Math.round(m.kcal)} kcal · ${m.protein.toFixed(1)} P from 30 g of whey`;
 });
 
-t('the night shake reconstructs to the handover figure', () => {
+t('the night shake lands on its slot plan with a scoop and a half', () => {
   const m = recipeMacros(SHAKE_DEFAULT);
-  near(m.kcal, 352, 2, 'kcal'); near(m.protein, 42, 1, 'protein');
-  return `${Math.round(m.kcal)} kcal · ${Math.round(m.protein)} P`;
+  near(m.kcal, 361, 4, 'kcal'); near(m.protein, 42.8, 1, 'protein');
+  const whey = SHAKE_DEFAULT.find(r => r.id === 'whey');
+  assert(whey.qty === 9, 'the shake should be 45 g, a scoop and a half');
+  return `${Math.round(m.kcal)} kcal · ${m.protein.toFixed(1)} P from 45 g of whey`;
+});
+
+t('the two fixed recipes together cover their share of the day', () => {
+  const m = M.add(recipeMacros(BREAKFAST_DEFAULT), recipeMacros(SHAKE_DEFAULT));
+  const plan = M.add(SLOT_PLAN.breakfast, SLOT_PLAN.shake);
+  near(m.kcal, plan.kcal, 40, 'kcal against plan');
+  near(m.protein, plan.protein, 3, 'protein against plan');
+  return `${Math.round(m.kcal)} kcal vs ${plan.kcal} planned, ${
+    Math.round(m.protein)} g P vs ${plan.protein}`;
+});
+
+t('the whey override reads per 100 g, the way a tub is labelled', () => {
+  const base = homeItem('whey', null);
+  assert(base.unitGrams === 5, 'whey is counted in 5 g units');
+  /* A 100 g label of 400 kcal / 80 g protein must become 20 / 4 per 5 g unit. */
+  const over = homeItem('whey', { kcal: 400, protein: 80, fat: 8, carbs: 4 });
+  near(over.macros.kcal, 20, 0.01, 'kcal per 5 g');
+  near(over.macros.protein, 4, 0.01, 'protein per 5 g');
+  assert(!over.estimated, 'a tub you typed in is not an estimate');
+  return '400 kcal/100 g -> 20 kcal per 5 g unit';
 });
 
 t('breakfast + two recommended trays + shake lands within 5% of 3550 and over 175 g protein', () => {

@@ -5,6 +5,7 @@ import * as S from '../lib/store.js';
 import * as ST from '../lib/streak.js';
 import { MAINTENANCE, ABOUT, SLOT_ORDER, SLOT_LABEL, TARGETS, SLOT_PLAN } from '../config.js';
 import { FOODS } from '../data/foods.js';
+import { WHEY_DEFAULT_PER_100G } from '../data/home.js';
 import { esc, n0, switchRow, openSheet, closeSheet } from './common.js';
 import { freezeSheet } from './streakview.js';
 
@@ -89,13 +90,16 @@ export function render() {
 
     <div class="section-title">Whey</div>
     <div class="card">
-      <p class="tiny muted">The app ships with a generic concentrate. Put your own tub's label
-        values in, per 10 g of powder.</p>
-      ${num('kcal per 10 g', (st.wheyOverride || {}).kcal ?? 40, 'whey.kcal', 1)}
-      ${num('Protein per 10 g', (st.wheyOverride || {}).protein ?? 8, 'whey.protein', 0.1)}
-      ${num('Fat per 10 g', (st.wheyOverride || {}).fat ?? 0.37, 'whey.fat', 0.01)}
-      ${num('Carbs per 10 g', (st.wheyOverride || {}).carbs ?? 1, 'whey.carbs', 0.1)}
-      ${st.wheyOverride ? `<button class="btn wide ghost" data-act="clearWhey">Back to generic</button>` : ''}
+      <p class="tiny muted">Set up for <b>MyProtein Impact Whey, Chocolat Onctueux</b>.
+        Change a tub by copying the four numbers straight off its label — these are
+        <b>per 100 g</b>, exactly as printed, no arithmetic needed.</p>
+      ${num('kcal per 100 g', (st.wheyOverride || {}).kcal ?? WHEY_DEFAULT_PER_100G.kcal, 'whey.kcal', 1)}
+      ${num('Protein per 100 g', (st.wheyOverride || {}).protein ?? WHEY_DEFAULT_PER_100G.protein, 'whey.protein', 0.1)}
+      ${num('Fat per 100 g', (st.wheyOverride || {}).fat ?? WHEY_DEFAULT_PER_100G.fat, 'whey.fat', 0.1)}
+      ${num('Carbs per 100 g', (st.wheyOverride || {}).carbs ?? WHEY_DEFAULT_PER_100G.carbs, 'whey.carbs', 0.1)}
+      <p class="tiny muted">Watch for the word <i>sec</i> or <i>dry basis</i> next to a protein
+        figure — that is the unflavoured number and it is always higher than what is in the bag.</p>
+      ${st.wheyOverride ? `<button class="btn wide ghost" data-act="clearWhey">Back to the shipped figures</button>` : ''}
     </div>
 
     <div class="section-title">Catalogue</div>
@@ -165,7 +169,7 @@ export function onAct(act, ds, e, rerender, go) {
       const [group, key] = ds.k.split('.');
       if (!key) return S.setSettings({ [group]: v });
       if (group === 'whey') {
-        const base = st.wheyOverride || { kcal: 40, protein: 8, fat: 0.37, carbs: 1 };
+        const base = st.wheyOverride || { ...WHEY_DEFAULT_PER_100G };
         return S.setSettings({ wheyOverride: { ...base, [key]: v } });
       }
       return S.setSettings({ [group]: { ...st[group], [key]: v } });
